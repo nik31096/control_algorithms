@@ -4,14 +4,15 @@ from tensorboardX import SummaryWriter
 
 from tqdm import trange
 
-from .ddpg_multi_env import DDPG
-from .utils import ExperienceReplay
-from .multiprocessing_environment.subproc_env import SubprocVecEnv
+from robotics.DDPG.ddpg_agent import DDPG
+from robotics.DDPG.utils import ExperienceReplay
+from robotics.DDPG.multiprocessing_environment.subproc_env import SubprocVecEnv
 
 
 # hyperparameters and same code snippets for both modes
-gamma = 0.95
-EPS = 0.01
+n_epochs = 100000
+gamma = 0.99
+tau = 1e-3
 batch_size = 512
 writer_name = "./runs/run_3"
 
@@ -43,13 +44,14 @@ if mode == 'multi_env':
                  action_space_shape=envs.action_space.shape[0],
                  action_ranges=(envs.action_space.low[0], envs.action_space.high[0]),
                  gamma=gamma,
+                 tau=tau,
                  writer=writer
                  )
-    pretrained = True
+    pretrained = False
     if pretrained:
         agent.load_pretrained('./weights', 'ddpg_1')
 
-    for epoch in trange(1000):
+    for epoch in trange(n_epochs):
         for step in range(1000):
             actions = agent.select_action(states['observation'], states['desired_goal'], states['achieved_goal'])
             next_states, rewards, dones, info = envs.step(actions.data.numpy())
@@ -63,8 +65,11 @@ if mode == 'multi_env':
 
             if len(replay_buffer) > batch_size:
                 # Training
-                batch = replay_buffer.sample(batch_size)
-                agent.train(batch, epoch, iterations=10 if len(replay_buffer) < 100000 else 100)
+                for iter_ in range(1 if len(replay_buffer) < 100000 else 10):
+                    batch = replay_buffer.sample(batch_size)
+                    agent.train(batch, epoch)
+
+            agent.syncronize_online_networks()
         if (epoch + 1) % 50 == 0:
             agent.save_models('./weights', 'ddpg_1')
 
@@ -79,11 +84,12 @@ else:
                  action_space_shape=env.action_space.shape[0],
                  action_ranges=(env.action_space.low[0], env.action_space.high[0]),
                  gamma=gamma,
+                 tau=tau,
                  writer=writer,
                  mode='single_env'
                  )
-    state = env.reset()
-    for epoch in trange(100000):
+
+    for epoch in trange(n_epochs):
         for step in range(1000):
             action = agent.select_action(state['observation'], state['desired_goal'], state['achieved_goal'])
             next_state, reward, done, _ = env.step(action.data.numpy())

@@ -16,6 +16,7 @@ class PolicyNetwork(nn.Module):
         self.layer_goal = nn.Linear(2 * goal_shape, 200)
         self.layer1 = nn.Linear(400, 100)
         self.layer2 = nn.Linear(100, output_shape)
+        self.layer3 = nn.Linear(100, output_shape)
 
     def forward(self, observation, desired_goal, achieved_goal):
         # check if observation, desired_goal and achieved_goal are torch tensors
@@ -32,12 +33,17 @@ class PolicyNetwork(nn.Module):
         out = F.leaky_relu(self.layer1(out))
 
         mu = torch.tanh(self.layer2(out))
+        mu = mu + torch.randn_like(mu) * 0.1
+        mu = torch.clamp(mu, self.action_ranges[0], self.action_ranges[1])
+        # sigma = torch.relu(self.layer3(out))
+
+        # distribution = torch.distributions.Normal(mu, sigma)
 
         # TODO: think about noise added to action to improve exploration. Do we really need this?
-        action = mu + torch.randn_like(mu) * 0.1
-        action = torch.clamp(action, self.action_ranges[0], self.action_ranges[1])
+        # action = distribution.sample() + torch.randn_like(mu) * 0.1
+        # action = torch.clamp(mu, self.action_ranges[0], self.action_ranges[1])
 
-        return action
+        return mu
 
 
 class ValueNetwork(nn.Module):
