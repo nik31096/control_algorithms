@@ -31,7 +31,7 @@ if mode == 'multi_env':
 
 
     env_id = "FetchReach-v1"
-    n_envs = 8
+    n_envs = 2
 
     distance_writers = [SummaryWriter(f'{writer_name}/distance_writer.env_{i}') for i in range(n_envs)]
 
@@ -45,7 +45,6 @@ if mode == 'multi_env':
                  action_ranges=(envs.action_space.low[0], envs.action_space.high[0]),
                  gamma=gamma,
                  tau=tau,
-                 writer=writer
                  )
     pretrained = False
     if pretrained:
@@ -55,7 +54,7 @@ if mode == 'multi_env':
         for step in range(1000):
             actions = agent.select_action(states['observation'], states['desired_goal'], states['achieved_goal'])
             next_states, rewards, dones, info = envs.step(actions.data.numpy())
-            replay_buffer.put(states, actions, rewards, next_states, dones)
+            replay_buffer.put(states, actions.data.numpy(), rewards, next_states, dones)
             for i in range(n_envs):
                 if dones[i]:
                     distance = np.linalg.norm(states['desired_goal'][i] - states['achieved_goal'][i])
@@ -67,9 +66,13 @@ if mode == 'multi_env':
                 # Training
                 for iter_ in range(1 if len(replay_buffer) < 100000 else 10):
                     batch = replay_buffer.sample(batch_size)
-                    agent.train(batch, epoch)
+                    value_loss, policy_loss = agent.train(batch)
 
-            agent.syncronize_online_networks()
+                writer.add_scalar("Value_loss", value_loss, epoch)
+                writer.add_scalar("Policy_loss", policy_loss, epoch)
+
+                agent.syncronize_online_networks()
+
         if (epoch + 1) % 50 == 0:
             agent.save_models('./weights', 'ddpg_1')
 
