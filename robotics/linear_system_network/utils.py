@@ -18,7 +18,7 @@ class ExperienceReplay:
         self.data = []
         self._next = 0
         self.cuda = cuda
-
+ 
     def put(self, states, actions, next_states):
         '''
         :param states: big dictionary with keys: "observation", "desired_goal", "achieved_goal"
@@ -42,11 +42,13 @@ class ExperienceReplay:
 
             self._next = (self._next + 1) % self.size
 
-    def sample(self, batch_size):
+    def get_sample(self):
+        return self.data[np.random.choice(len(self.data))]
+
+    def sample(self, size):
         obs_pos, pos, obs_actions, actions, next_pos = [], [], [], [], []
-        idxs = np.random.randint(0, len(self.data), batch_size)
-        for idx in idxs:
-            sample = self.data[idx]
+        for i in range(size):
+            sample = self.get_sample()
             obs_pos.append(torch.cat([sample.obs, sample.pos], dim=-1))
             pos.append(sample.pos)
             obs_actions.append(torch.cat([sample.obs, sample.action], dim=-1))
@@ -72,14 +74,22 @@ class Network(nn.Module):
     def __init__(self, input_dim, output_shape):
         super(Network, self).__init__()
         self.layer1 = nn.Linear(input_dim, 256)
-        self.layer2 = nn.Linear(256, 256)
-        self.layer3 = nn.Linear(256, output_shape[0] * output_shape[1])
+        self.layer2 = nn.Linear(256, 512)
+        self.layer3 = nn.Linear(512, 256)
+        self.layer4 = nn.Linear(256, output_shape[0] * output_shape[1])
         self.output_shape = output_shape
 
     def forward(self, x):
-        out = F.leaky_relu(self.layer1(x))
-        out = F.leaky_relu(self.layer2(out))
+        out = swish(self.layer1(x))
+        out = swish(self.layer2(out))
         out = swish(self.layer3(out))
         out = torch.reshape(out, (x.shape[0], *self.output_shape))
 
         return out
+
+
+class GlobalNetwork(nn.Module):
+    def __init__(self, state_dim, action_dim):
+        super(GlobalNetwork, self).__init__()
+        self.layer1 = nn.Linear()
+

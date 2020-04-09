@@ -4,8 +4,8 @@ import numpy as np
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-from robotics.linear_system_network.linear_system_network import ExperienceReplay, Network
-from robotics.linear_system_network.linear_system_network import SubprocVecEnv
+from .utils import ExperienceReplay, Network
+from .multiprocessing_environment.subproc_env import SubprocVecEnv
 
 
 def make_env(env_id):
@@ -16,15 +16,15 @@ def make_env(env_id):
 
 
 env_id = "FetchReach-v1"
-n_envs = 24
+n_envs = 12
 
 envs = [make_env(env_id) for _ in range(n_envs)]
-envs = SubprocVecEnv(envs, context='fork', in_series=3)
+envs = SubprocVecEnv(envs, context='fork')
 states = envs.reset()
 
 writer = SummaryWriter('./runs/run1')
 
-replay = ExperienceReplay(size=1000000)
+replay = ExperienceReplay(size=5000000)
 
 # Интересный вопрос связан с выбором состояния: если выбирать в качестве состояния только позицию гриппера в 3d,
 # то есть действия, которые не изменят эту позицию (то есть действительное положение манипулятора изменилось,
@@ -44,7 +44,7 @@ action_network = Network(input_dim=m + o, output_shape=(n, m)).to('cuda')
 opt = torch.optim.Adam(list(state_network.parameters()) + list(action_network.parameters()), lr=1e-3)
 
 epoch2save = 5000
-batch_size = 512
+batch_size = 4096
 
 for epoch in trange(1000000):
     actions = np.array([envs.action_space.sample() for _ in range(n_envs)])
@@ -68,7 +68,6 @@ for epoch in trange(1000000):
             opt.zero_grad()
 
     if (epoch + 1) % epoch2save == 0:
-        torch.save("./weights/state_network.pt", state_network.state_dict())
-        torch.save("./weights/action_network.pt", action_network.state_dict())
+        torch.save(state_network.state_dict(), "./weights/state_network.pt")
+        torch.save(action_network.state_dict(), "./weights/action_network.pt")
 
-# TODO: get the way to save experience replay buffer on disk
