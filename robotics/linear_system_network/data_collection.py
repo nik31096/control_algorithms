@@ -1,5 +1,9 @@
 import gym
 import numpy as np
+
+import sys
+sys.path.append("~/control_algorithms")
+
 from multiprocessing_environment.subproc_env import SubprocVecEnv
 from robotics.DDPG.utils import ExperienceReplay
 
