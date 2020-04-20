@@ -13,6 +13,8 @@ class DDPG:
                  action_space_shape,
                  action_ranges,
                  gamma,
+                 actor_lr,
+                 critic_lr,
                  tau,
                  mode='multi_env'):
         self.gamma = gamma
@@ -37,11 +39,14 @@ class DDPG:
         # value networks update
         self._hard_update(self.target_critic, self.critic)
 
-        self.policy_opt = torch.optim.Adam(self.actor_gpu.parameters(), lr=1e-4)
-        self.value_opt = torch.optim.Adam(self.critic.parameters(), lr=1e-3, weight_decay=1e-2)
+        self.policy_opt = torch.optim.Adam(self.actor_gpu.parameters(), lr=actor_lr)
+        self.value_opt = torch.optim.Adam(self.critic.parameters(), lr=critic_lr, weight_decay=1e-2)
 
-    def select_action(self, states, desired_goals, achieved_goals):
-        actions = self.actor_cpu(states, desired_goals, achieved_goals)
+    def select_action(self, states, mode='train'):
+        observations = states['observation']
+        desired_goals = states['desired_goal']
+        achieved_goals = states['achieved_goal']
+        actions = self.actor_cpu(observations, desired_goals, achieved_goals, mode=mode)
 
         return actions
 

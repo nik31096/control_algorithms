@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import numpy as np
+import os
+from matplotlib import pyplot as plt
 from collections import namedtuple
 import random
 import cloudpickle
@@ -19,7 +21,7 @@ class PolicyNetwork(nn.Module):
         self.layer2.weight.data.mul_(0.1)
         self.layer2.bias.data.mul_(0.1)
 
-    def forward(self, observation, desired_goal, achieved_goal):
+    def forward(self, observation, desired_goal, achieved_goal, mode='train'):
         # check if observation, desired_goal and achieved_goal are torch tensors
         if not isinstance(observation, torch.Tensor):
             observation = torch.FloatTensor(observation)
@@ -34,7 +36,8 @@ class PolicyNetwork(nn.Module):
         out = F.leaky_relu(self.layer1(out))
 
         action = torch.tanh(self.layer2(out))
-        action = torch.clamp(action + 0.1*torch.randn_like(action), self.action_ranges[0], self.action_ranges[1])
+        action = torch.clamp(action + 0.1*torch.randn_like(action) if mode == 'train' else action,
+                             self.action_ranges[0], self.action_ranges[1])
 
         return action
 
@@ -102,13 +105,15 @@ class ExperienceReplay:
 
                 if reward == -1.0 and done is True and random.random() < 0.2:
                     reward = 1
+                reward = 100 if reward == -0.0 else reward
+
 
                 if self._next >= len(self.data):
                     self.data.append(
                         item(ob, des_goal, ach_goal, action, reward, next_ob, next_des_goal, next_ach_goal, done)
                     )
                 else:
-                    self.data[self._next] = item(ob, des_goal, ach_goal, action, -0.1,
+                    self.data[self._next] = item(ob, des_goal, ach_goal, action, reward,
                                                  next_ob, next_des_goal, next_ach_goal, done)
                 self._next = (self._next + 1) % self.size
         else:
@@ -134,7 +139,7 @@ class ExperienceReplay:
                     item(ob, des_goal, ach_goal, action, reward, next_ob, next_des_goal, next_ach_goal, done)
                 )
             else:
-                self.data[self._next] = item(ob, des_goal, ach_goal, action, -0.1,
+                self.data[self._next] = item(ob, des_goal, ach_goal, action, reward,
                                              next_ob, next_des_goal, next_ach_goal, done)
 
             self._next = (self._next + 1) % self.size
@@ -142,6 +147,10 @@ class ExperienceReplay:
     def save(self, filename):
         with open(filename, 'wb') as f:
             cloudpickle.dump(self.data, f)
+
+    def load(self, filename):
+        with open(filename, 'rb') as f:
+            self.data = cloudpickle.load(f)
 
     def sample(self, batch_size):
         if self.mode == 'multi_env':
@@ -200,3 +209,28 @@ class ExperienceReplay:
 
     def __len__(self):
         return len(self.data)
+
+
+class DistanceLogging:
+    def __init__(self, n_envs):
+        self.data = [[] for _ in range(n_envs)]
+
+    def put(self, index, value):
+        self.data[index].append(value)
+
+    def save(self, filename):
+        with open(filename, 'wb') as f:
+            cloudpickle.dump(self.data, f)
+
+    def load(self, filename):
+        with open(filename, 'rb') as f:
+            self.data = cloudpickle.load(f)
+
+    def get_plot(self, filename):
+        for env in self.data:
+            plt.plot(env)
+
+        if not os.path.exists('./figures'):
+            os.mkdir('./figures')
+
+        plt.savefig(f'./figures/{filename}')

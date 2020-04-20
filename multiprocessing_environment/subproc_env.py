@@ -101,8 +101,8 @@ class SubprocVecEnv(VecEnv):
         remote = self.remotes[env_index]
         remote.send(('reset', None))
         obs = remote.recv()
-        obs = _flatten_list(obs)
-        return _flatten_obs(obs)
+
+        return obs[0]
 
     def close_extras(self):
         self.closed = True
