@@ -49,14 +49,14 @@ if mode == 'multi_env':
                  actor_lr=1e-4,
                  critic_lr=1e-3
                  )
-    pretrained = False
+    pretrained = True
     if pretrained:
         agent.load_pretrained('./weights', 'ddpg_1')
 
     for epoch in trange(n_epochs):
         actions = agent.select_action(states)
-        next_states, rewards, dones, info = envs.step(actions.data.numpy())
-        replay_buffer.put(states, actions.data.numpy(), rewards, next_states, dones)
+        next_states, rewards, dones, info = envs.step(actions)
+        replay_buffer.put(states, actions, rewards, next_states, dones)
         for i in range(n_envs):
             if dones[i]:
                 distance = np.linalg.norm(states['desired_goal'][i] - states['achieved_goal'][i])

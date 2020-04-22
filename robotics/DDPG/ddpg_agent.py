@@ -48,7 +48,7 @@ class DDPG:
         achieved_goals = states['achieved_goal']
         actions = self.actor_cpu(observations, desired_goals, achieved_goals, mode=mode)
 
-        return actions
+        return actions.data.numpy()
 
     def train(self, batch):
         obs, des_goals, ach_goals, actions, rewards, next_obs, next_des_goals, next_ach_goals, dones = batch
@@ -80,11 +80,13 @@ class DDPG:
         state_dict = deepcopy(self.actor_gpu.state_dict())
         self.actor_cpu.load_state_dict(OrderedDict({key: state_dict[key].cpu() for key in state_dict}))
 
-    def _hard_update(self, target, online):
+    @staticmethod
+    def _hard_update(target, online):
         for target_param, param in zip(target.parameters(), online.parameters()):
             target_param.data.copy_(param.data)
 
-    def _soft_update(self, target, online, tau):
+    @staticmethod
+    def _soft_update(target, online, tau):
         for target_param, param in zip(target.parameters(), online.parameters()):
             target_param.data.copy_((1 - tau)*target_param + tau*param)
 
