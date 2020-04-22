@@ -1,14 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import Normal
 
 import numpy as np
 from collections import namedtuple
 import random
 import cloudpickle
-
-
-###################################### Neural networks ###########################
+from matplotlib import pyplot as plt
+import os
 
 
 class PolicyNetwork(nn.Module):
@@ -21,16 +21,9 @@ class PolicyNetwork(nn.Module):
         self.layer2 = nn.Linear(100, output_shape)
         self.layer3 = nn.Linear(100, output_shape)
 
-    def forward(self, observation, desired_goal, achieved_goal):
-        # check if observation, desired_goal and achieved_goal are torch tensors
-        if not isinstance(observation, torch.Tensor):
-            observation = torch.FloatTensor(observation)
-            desired_goal = torch.FloatTensor(desired_goal)
-            achieved_goal = torch.FloatTensor(achieved_goal)
-
+    def forward(self, observation, goals, mode='train'):
         processed_obs = F.leaky_relu(self.layer_obs(observation))
-        concat_goal = torch.cat([desired_goal, achieved_goal], dim=-1)
-        processed_goal = F.leaky_relu(self.layer_goal(concat_goal))
+        processed_goal = F.leaky_relu(self.layer_goal(goals))
 
         out = torch.cat([processed_obs, processed_goal], dim=-1)
         out = F.leaky_relu(self.layer1(out))
@@ -38,34 +31,33 @@ class PolicyNetwork(nn.Module):
         mu = torch.tanh(self.layer2(out))
         sigma = torch.relu(self.layer3(out))
 
-        distribution = torch.distributions.Normal(mu, sigma)
+        distribution = Normal(mu, sigma)
 
         # TODO: think about noise added to action to improve exploration. Do we really need this?
-        action = distribution.sample() + torch.randn_like(mu) * 0.1
+        action = distribution.rsample()
+        action = action + torch.randn_like(mu) if mode == 'train' else action
         action = torch.clamp(action, self.action_ranges[0], self.action_ranges[1])
 
-        return action
+        if mode == 'train':
+            return action, distribution.log_prob(action)
+        else:
+            return action
 
 
 class ValueNetwork(nn.Module):
-    def __init__(self, obs_shape, goal_shape, action_shape):
+    def __init__(self, obs_shape, goal_shape):
         super(ValueNetwork, self).__init__()
         self.layer_obs = nn.Linear(obs_shape, 200)
-        self.layer_goal = nn.Linear(2 * goal_shape, 200)
-        self.layer_action = nn.Linear(action_shape, 200)
+        self.layer_goal = nn.Linear(2*goal_shape, 200)
         self.layer1 = nn.Linear(400, 200)
         self.layer2 = nn.Linear(400, 64)
         self.layer3 = nn.Linear(64, 1)
 
-    def forward(self, observations, desired_goals, achieved_goals, actions):
+    def forward(self, observations, goals, actions):
         processed_obs = F.leaky_relu(self.layer_obs(observations))
-        concat_goal = torch.cat([desired_goals, achieved_goals], dim=-1)
-        processed_goals = F.leaky_relu(self.layer_goal(concat_goal))
+        processed_goals = F.leaky_relu(self.layer_goal(goals))
         out = torch.cat([processed_obs, processed_goals], dim=-1)
         out = F.leaky_relu(self.layer1(out))
-
-        processed_actions = F.leaky_relu(self.layer_action(actions))
-        out = torch.cat([out, processed_actions], dim=-1)
         out = F.leaky_relu(self.layer2(out))
         out = F.leaky_relu(self.layer3(out))
 
@@ -74,8 +66,9 @@ class ValueNetwork(nn.Module):
 
 class QNetwork(nn.Module):
     def __init__(self, observation_shape, goal_shape, action_shape):
+        super(QNetwork, self).__init__()
         self.layer_obs = nn.Linear(observation_shape, 256)
-        self.layer_goal = nn.Linear(goal_shape, 256)
+        self.layer_goal = nn.Linear(2*goal_shape, 256)
         self.layer1 = nn.Linear(512, 256)
 
         self.layer_action = nn.Linear(action_shape, 256)
@@ -92,15 +85,14 @@ class QNetwork(nn.Module):
 
         action_ = F.leaky_relu(self.layer_action(action))
 
-        state_action = torch.stack([out, action_], dim=-1)
+        state_action = torch.stack([state, action_], dim=-1)
         out = F.leaky_relu(self.layer2(state_action))
         out = F.leaky_relu(self.layer3(out))
 
         return out
 
 
-################################### Experience replay stuff ######################################
-Item = namedtuple("experience_replay_item", ("obs", "desired_goal", "achieved_goal", "action",
+item = namedtuple("experience_replay_item", ("obs", "desired_goal", "achieved_goal", "action",
                                              "reward", "next_obs", "next_desired_goal",
                                              "next_achieved_goal", "done"))
 
@@ -112,6 +104,7 @@ class ExperienceReplay:
         self._next = 0
 
     def put(self, states, actions, rewards, next_states, dones):
+        # TODO: add state and goal normalization
         obs = states["observation"]
         des_goals = states["desired_goal"]
         ach_goals = states["achieved_goal"]
@@ -181,3 +174,30 @@ class ExperienceReplay:
 
     def __len__(self):
         return len(self.data)
+
+
+class DistanceLogging:
+    def __init__(self, n_envs):
+        self.data = [[] for _ in range(n_envs)]
+
+    def put(self, index, value):
+        self.data[index].append(value)
+
+    def save(self, filename):
+        with open(filename, 'wb') as f:
+            cloudpickle.dump(self.data, f)
+
+    def load(self, filename):
+        with open(filename, 'rb') as f:
+            self.data = cloudpickle.load(f)
+
+    def get_plot(self, filename):
+        for env in self.data:
+            plt.plot(env)
+
+        if not os.path.exists('./figures'):
+            os.mkdir('./figures')
+
+        plt.savefig(f'./figures/{filename}')
+
+
