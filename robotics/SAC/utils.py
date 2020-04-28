@@ -10,6 +10,10 @@ import cloudpickle
 from matplotlib import pyplot as plt
 import os
 
+MIN_SIGMA = 1e-6
+MAX_SIGMA = 10
+eps = 1e-6
+
 
 class PolicyNetwork(nn.Module):
     def __init__(self, obs_shape, goal_shape, output_shape, action_ranges):
@@ -21,6 +25,9 @@ class PolicyNetwork(nn.Module):
         self.layer2 = nn.Linear(100, output_shape)
         self.layer3 = nn.Linear(100, output_shape)
 
+        self.action_scale = (action_ranges[1] - action_ranges[0]) / 2
+        self.action_bias = (action_ranges[1] + action_ranges[0]) / 2
+
     def forward(self, observation, goals, mode='train'):
         processed_obs = F.leaky_relu(self.layer_obs(observation))
         processed_goal = F.leaky_relu(self.layer_goal(goals))
@@ -28,18 +35,28 @@ class PolicyNetwork(nn.Module):
         out = torch.cat([processed_obs, processed_goal], dim=-1)
         out = F.leaky_relu(self.layer1(out))
 
-        mu = torch.tanh(self.layer2(out))
-        sigma = torch.relu(self.layer3(out))
+        mu = F.leaky_relu(self.layer2(out))
+
+        if mode == 'deterministic':
+            return torch.tanh(mu)
+
+        # TODO: make sigma a matrix (n_a, n_a), but not a diagonal matrix
+        sigma = torch.clamp(torch.relu(self.layer3(out)), MIN_SIGMA, MAX_SIGMA)
 
         distribution = Normal(mu, sigma)
 
-        # TODO: think about noise added to action to improve exploration. Do we really need this?
-        action = distribution.rsample()
-        action = action + torch.randn_like(mu) if mode == 'train' else action
-        action = torch.clamp(action, self.action_ranges[0], self.action_ranges[1])
+        sample_action = distribution.rsample()
+        # action = torch.clamp(action, self.action_ranges[0], self.action_ranges[1])
+        action = torch.tanh(sample_action)
+
+        log_prob = distribution.log_prob(sample_action)
+        # from SAC paper original, page 12
+        log_prob -= torch.sum(self.action_scale*torch.log(1 - action.pow(2) + eps))
+
+        action = action * self.action_scale + self.action_bias
 
         if mode == 'train':
-            return action, distribution.log_prob(action)
+            return action, log_prob
         else:
             return action
 
@@ -47,13 +64,13 @@ class PolicyNetwork(nn.Module):
 class ValueNetwork(nn.Module):
     def __init__(self, obs_shape, goal_shape):
         super(ValueNetwork, self).__init__()
-        self.layer_obs = nn.Linear(obs_shape, 200)
-        self.layer_goal = nn.Linear(2*goal_shape, 200)
-        self.layer1 = nn.Linear(400, 200)
-        self.layer2 = nn.Linear(400, 64)
+        self.layer_obs = nn.Linear(obs_shape, 256)
+        self.layer_goal = nn.Linear(2 * goal_shape, 256)
+        self.layer1 = nn.Linear(512, 256)
+        self.layer2 = nn.Linear(256, 64)
         self.layer3 = nn.Linear(64, 1)
 
-    def forward(self, observations, goals, actions):
+    def forward(self, observations, goals):
         processed_obs = F.leaky_relu(self.layer_obs(observations))
         processed_goals = F.leaky_relu(self.layer_goal(goals))
         out = torch.cat([processed_obs, processed_goals], dim=-1)
@@ -68,7 +85,7 @@ class QNetwork(nn.Module):
     def __init__(self, observation_shape, goal_shape, action_shape):
         super(QNetwork, self).__init__()
         self.layer_obs = nn.Linear(observation_shape, 256)
-        self.layer_goal = nn.Linear(2*goal_shape, 256)
+        self.layer_goal = nn.Linear(2 * goal_shape, 256)
         self.layer1 = nn.Linear(512, 256)
 
         self.layer_action = nn.Linear(action_shape, 256)
@@ -79,22 +96,22 @@ class QNetwork(nn.Module):
     def forward(self, observation, goal, action):
         obs = F.leaky_relu(self.layer_obs(observation))
         goal_ = F.leaky_relu(self.layer_goal(goal))
-        obs_goal = torch.stack([obs, goal_], dim=-1)
+        obs_goal = torch.cat([obs, goal_], dim=-1)
 
         state = F.leaky_relu(self.layer1(obs_goal))
 
         action_ = F.leaky_relu(self.layer_action(action))
 
-        state_action = torch.stack([state, action_], dim=-1)
+        state_action = torch.cat([state, action_], dim=-1)
         out = F.leaky_relu(self.layer2(state_action))
         out = F.leaky_relu(self.layer3(out))
 
         return out
 
 
-item = namedtuple("experience_replay_item", ("obs", "desired_goal", "achieved_goal", "action",
-                                             "reward", "next_obs", "next_desired_goal",
-                                             "next_achieved_goal", "done"))
+item = namedtuple("experience_replay_item", ("obs", "des_goal", "ach_goal", "action",
+                                             "reward", "next_obs", "next_des_goal",
+                                             "next_ach_goal", "done"))
 
 
 class ExperienceReplay:
@@ -182,6 +199,11 @@ class DistanceLogging:
 
     def put(self, index, value):
         self.data[index].append(value)
+
+    def calculate_distances(self, states):
+        for i in range(len(self.data)):
+            distance = np.linalg.norm(states['desired_goal'][i] - states['achieved_goal'][i])
+            self.put(index=i, value=distance)
 
     def save(self, filename):
         with open(filename, 'wb') as f:

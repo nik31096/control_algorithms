@@ -11,11 +11,12 @@ from multiprocessing_environment.subproc_env import SubprocVecEnv
 
 
 # hyperparameters and same code snippets for both modes
-n_epochs = 1000000
-gamma = 0.99
+n_epochs = 10000000
+gamma = 0.999
 tau = 1e-3
-batch_size = 512
+batch_size = 1024
 writer_name = "./runs/run_3"
+distance_writer_name = "run_3"
 
 replay_buffer = ExperienceReplay()
 writer = SummaryWriter(writer_name)
@@ -46,27 +47,38 @@ if mode == 'multi_env':
                      action_ranges=(envs.action_space.low[0], envs.action_space.high[0]),
                      gamma=gamma,
                      tau=tau,
-
+                     q_lr=1e-4,
+                     value_lr=1e-4,
+                     policy_lr=1e-4
                      )
-    '''
-    agent = DDPG(observation_space_shape=envs.observation_space["observation"].shape[0],
-                 goal_space_shape=envs.observation_space["achieved_goal"].shape[0],
-                 action_space_shape=envs.action_space.shape[0],
-                 action_ranges=(envs.action_space.low[0], envs.action_space.high[0]),
-                 gamma=gamma,
-                 tau=tau,
-                 actor_lr=1e-4,
-                 critic_lr=1e-3
-                 )
-    '''
-    pretrained = True
+
+    pretrained = False
     if pretrained:
-        agent.load_pretrained('./weights', 'ddpg_1')
+        agent.load_pretrained_models('sac_1')
 
     for epoch in trange(n_epochs):
-        actions = agent.select_action(states)
-        next_states, rewards, dones, info = envs.step(actions)
-        replay_buffer.put(states, actions, rewards, next_states, dones)
+        for step in range(1000):
+            actions = agent.select_action(states)
+            next_states, rewards, dones, info = envs.step(actions)
+            replay_buffer.put(states, actions, rewards, next_states, dones)
+            states = next_states
+            if np.all(dones):
+                states = envs.reset()
+                if len(replay_buffer) > 10 * batch_size:
+                    # Training
+                    batch = replay_buffer.sample(batch_size)
+                    value_loss, q_1_loss, q_2_loss, policy_loss = agent.train(batch)
+
+                    writer.add_scalar("Value_loss", value_loss, epoch)
+                    writer.add_scalar("Q1_loss", q_1_loss, epoch)
+                    writer.add_scalar("Q2_loss", q_2_loss, epoch)
+                    writer.add_scalar("Policy_loss", policy_loss, epoch)
+
+                    if (epoch + 1) % 1000 == 0:
+                        distance_logger.calculate_distances(next_states)
+            break
+
+        '''
         for i in range(n_envs):
             if dones[i]:
                 distance = np.linalg.norm(states['desired_goal'][i] - states['achieved_goal'][i])
@@ -75,10 +87,9 @@ if mode == 'multi_env':
                 next_states['desired_goal'][i] = state['desired_goal']
                 next_states['achieved_goal'][i] = state['achieved_goal']
                 distance_logger.put(index=i, value=distance)
-
-        states = next_states
-
-        if len(replay_buffer) > batch_size:
+        
+        
+        if len(replay_buffer) > 10*batch_size:
             # Training
             n_iters = 10 if len(replay_buffer) < 100000 else 100
             for iter_ in range(n_iters):
@@ -87,22 +98,21 @@ if mode == 'multi_env':
 
             writer.add_scalar("Value_loss", value_loss, epoch)
             writer.add_scalar("Policy_loss", policy_loss, epoch)
-
-            agent.syncronize_online_networks()
+        '''
 
         if (epoch + 1) % 100000 == 0:
-            distance_logger.get_plot(writer_name)
+            distance_logger.get_plot(distance_writer_name)
+            agent.save_models('sac_2')
 
-        if (epoch + 1) % 500 == 0:
+        if (epoch + 1) % 5000 == 0:
             if not os.path.exists('./figures'):
                 os.mkdir('./figures')
-            agent.save_models('./weights', 'ddpg_1')
             # testing
             env = gym.make(env_id)
             state = env.reset()
             while True:
-                action = agent.select_action(state, mode='eval')
-                next_state, reward, done, _ = env.step(action.data.numpy())
+                action = agent.select_action(state)
+                next_state, reward, done, _ = env.step(action)
                 if done:
                     distance = np.linalg.norm(state['desired_goal'] - state['achieved_goal'])
                     writer.add_scalar("Evaluation distance", distance, global_step=(epoch + 1) // 500)
@@ -115,14 +125,18 @@ else:
     env = gym.make('FetchReach-v1')
     state = env.reset()
 
-    agent = DDPG(observation_space_shape=env.observation_space["observation"].shape[0],
-                 goal_space_shape=env.observation_space["achieved_goal"].shape[0],
-                 action_space_shape=env.action_space.shape[0],
-                 action_ranges=(env.action_space.low[0], env.action_space.high[0]),
-                 gamma=gamma,
-                 tau=tau,
-                 mode='single_env'
-                 )
+    agent = SACAgent(observation_space_shape=env.observation_space["observation"].shape[0],
+                     goal_space_shape=env.observation_space["achieved_goal"].shape[0],
+                     action_space_shape=env.action_space.shape[0],
+                     action_ranges=(env.action_space.low[0], env.action_space.high[0]),
+                     gamma=gamma,
+                     tau=tau,
+                     q_lr=1e-4,
+                     value_lr=1e-4,
+                     policy_lr=1e-4,
+                     train_device='cuda',
+                     mode='single_env'
+                     )
 
     for epoch in trange(n_epochs):
         for step in range(1000):
@@ -139,7 +153,7 @@ else:
 
             # Training
             batch = replay_buffer.sample(3000)
-            agent.train(batch, epoch=epoch, iterations=10)
+            agent.train(batch)
 
         if (epoch + 1) % 50 == 0:
             agent.save_models('./weights', 'single_env_ddpg_1')
