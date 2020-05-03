@@ -37,8 +37,8 @@ class PolicyNetwork(nn.Module):
 
         mu = F.leaky_relu(self.layer2(out))
 
-        if mode == 'deterministic':
-            return torch.tanh(mu)
+        if mode == 'eval':
+            return torch.tanh(mu)*self.action_scale + self.action_bias
 
         # TODO: make sigma a matrix (n_a, n_a), but not a diagonal matrix
         sigma = torch.clamp(torch.relu(self.layer3(out)), MIN_SIGMA, MAX_SIGMA)
@@ -55,10 +55,7 @@ class PolicyNetwork(nn.Module):
 
         action = action * self.action_scale + self.action_bias
 
-        if mode == 'train':
-            return action, log_prob
-        else:
-            return action
+        return action, log_prob
 
 
 class ValueNetwork(nn.Module):
@@ -187,7 +184,7 @@ class ExperienceReplay:
         G_a_n = torch.stack(G_a_n).to('cuda')
         dones = torch.FloatTensor(dones).to('cuda')
 
-        return O, G_d, G_a, A, R, O_n, G_d_n, G_a_n, dones
+        return O, G_d, G_a, A, R[:, np.newaxis], O_n, G_d_n, G_a_n, dones[:, np.newaxis]
 
     def __len__(self):
         return len(self.data)

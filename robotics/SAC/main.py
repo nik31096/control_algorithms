@@ -5,18 +5,18 @@ from tensorboardX import SummaryWriter
 from tqdm import trange
 import os
 
-from robotics.SAC.sac_agent import SACAgent
+from robotics.SAC.sac_agent import SACAgent_v1, SACAgent_v0
 from robotics.SAC.utils import ExperienceReplay, DistanceLogging
 from multiprocessing_environment.subproc_env import SubprocVecEnv
 
 
 # hyperparameters and same code snippets for both modes
-n_epochs = 10000000
-gamma = 0.999
-tau = 1e-3
-batch_size = 1024
-writer_name = "./runs/run_3"
-distance_writer_name = "run_3"
+n_epochs = 500000
+gamma = 0.99
+tau = 5e-3
+batch_size = 512
+writer_name = "./runs/run_5"
+distance_writer_name = "run_5"
 
 replay_buffer = ExperienceReplay()
 writer = SummaryWriter(writer_name)
@@ -41,16 +41,18 @@ if mode == 'multi_env':
     envs = SubprocVecEnv(envs, context='fork', in_series=1)
     states = envs.reset()
 
-    agent = SACAgent(observation_space_shape=envs.observation_space["observation"].shape[0],
-                     goal_space_shape=envs.observation_space["achieved_goal"].shape[0],
-                     action_space_shape=envs.action_space.shape[0],
-                     action_ranges=(envs.action_space.low[0], envs.action_space.high[0]),
-                     gamma=gamma,
-                     tau=tau,
-                     q_lr=1e-4,
-                     value_lr=1e-4,
-                     policy_lr=1e-4
-                     )
+    test_env = gym.make(env_id)
+
+    agent = SACAgent_v1(observation_space_shape=envs.observation_space["observation"].shape[0],
+                        goal_space_shape=envs.observation_space["achieved_goal"].shape[0],
+                        action_space_shape=envs.action_space.shape[0],
+                        action_ranges=(envs.action_space.low[0], envs.action_space.high[0]),
+                        gamma=gamma,
+                        tau=tau,
+                        q_lr=3e-4,
+                        alpha_lr=1e-4,
+                        policy_lr=3e-4
+                        )
 
     pretrained = False
     if pretrained:
@@ -64,19 +66,20 @@ if mode == 'multi_env':
             states = next_states
             if np.all(dones):
                 states = envs.reset()
-                if len(replay_buffer) > 10 * batch_size:
+                if len(replay_buffer) > batch_size:
                     # Training
                     batch = replay_buffer.sample(batch_size)
-                    value_loss, q_1_loss, q_2_loss, policy_loss = agent.train(batch)
+                    q_1_loss, q_2_loss, policy_loss, entropy_loss, alpha = agent.train(batch)
 
-                    writer.add_scalar("Value_loss", value_loss, epoch)
                     writer.add_scalar("Q1_loss", q_1_loss, epoch)
                     writer.add_scalar("Q2_loss", q_2_loss, epoch)
                     writer.add_scalar("Policy_loss", policy_loss, epoch)
+                    writer.add_scalar("Entropy loss", entropy_loss, epoch)
+                    writer.add_scalar("Alpha", alpha, epoch)
 
-                    if (epoch + 1) % 1000 == 0:
+                    if (epoch + 1) % 10000 == 0:
                         distance_logger.calculate_distances(next_states)
-            break
+                break
 
         '''
         for i in range(n_envs):
@@ -100,24 +103,22 @@ if mode == 'multi_env':
             writer.add_scalar("Policy_loss", policy_loss, epoch)
         '''
 
-        if (epoch + 1) % 100000 == 0:
+        if (epoch + 1) % 10000 == 0:
             distance_logger.get_plot(distance_writer_name)
-            agent.save_models('sac_2')
+            agent.save_models('sac_4')
 
-        if (epoch + 1) % 5000 == 0:
+        if (epoch + 1) % 500 == 0:
             if not os.path.exists('./figures'):
                 os.mkdir('./figures')
             # testing
-            env = gym.make(env_id)
-            state = env.reset()
+            state = test_env.reset()
             while True:
-                action = agent.select_action(state)
-                next_state, reward, done, _ = env.step(action)
+                action = agent.select_action(state, mode='eval')
+                next_state, reward, done, _ = test_env.step(action)
                 if done:
                     distance = np.linalg.norm(state['desired_goal'] - state['achieved_goal'])
                     writer.add_scalar("Evaluation distance", distance, global_step=(epoch + 1) // 500)
                     break
-            del env
 
     replay_buffer.save('./buffer')
 
@@ -125,18 +126,18 @@ else:
     env = gym.make('FetchReach-v1')
     state = env.reset()
 
-    agent = SACAgent(observation_space_shape=env.observation_space["observation"].shape[0],
-                     goal_space_shape=env.observation_space["achieved_goal"].shape[0],
-                     action_space_shape=env.action_space.shape[0],
-                     action_ranges=(env.action_space.low[0], env.action_space.high[0]),
-                     gamma=gamma,
-                     tau=tau,
-                     q_lr=1e-4,
-                     value_lr=1e-4,
-                     policy_lr=1e-4,
-                     train_device='cuda',
-                     mode='single_env'
-                     )
+    agent = SACAgent_v0(observation_space_shape=env.observation_space["observation"].shape[0],
+                        goal_space_shape=env.observation_space["achieved_goal"].shape[0],
+                        action_space_shape=env.action_space.shape[0],
+                        action_ranges=(env.action_space.low[0], env.action_space.high[0]),
+                        gamma=gamma,
+                        tau=tau,
+                        q_lr=1e-4,
+                        value_lr=1e-4,
+                        policy_lr=1e-4,
+                        train_device='cuda',
+                        mode='single_env'
+                        )
 
     for epoch in trange(n_epochs):
         for step in range(1000):
