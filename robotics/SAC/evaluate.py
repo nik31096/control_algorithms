@@ -15,7 +15,7 @@ agent = SACAgent_v1(env.observation_space['observation'].shape[0],
                     alpha_lr=1e-4,
                     policy_lr=1e-4,
 )
-agent.load_pretrained_models('sac_3')
+agent.load_pretrained_models('sac_4')
 
 while True:
     action = agent.select_action(state)

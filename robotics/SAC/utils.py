@@ -20,7 +20,7 @@ class PolicyNetwork(nn.Module):
         super(PolicyNetwork, self).__init__()
         self.action_ranges = action_ranges
         self.layer_obs = nn.Linear(obs_shape, 200)
-        self.layer_goal = nn.Linear(2 * goal_shape, 200)
+        self.layer_goal = nn.Linear(goal_shape, 200)
         self.layer1 = nn.Linear(400, 100)
         self.layer2 = nn.Linear(100, output_shape)
         self.layer3 = nn.Linear(100, output_shape)
@@ -62,7 +62,7 @@ class ValueNetwork(nn.Module):
     def __init__(self, obs_shape, goal_shape):
         super(ValueNetwork, self).__init__()
         self.layer_obs = nn.Linear(obs_shape, 256)
-        self.layer_goal = nn.Linear(2 * goal_shape, 256)
+        self.layer_goal = nn.Linear(goal_shape, 256)
         self.layer1 = nn.Linear(512, 256)
         self.layer2 = nn.Linear(256, 64)
         self.layer3 = nn.Linear(64, 1)
@@ -82,7 +82,7 @@ class QNetwork(nn.Module):
     def __init__(self, observation_shape, goal_shape, action_shape):
         super(QNetwork, self).__init__()
         self.layer_obs = nn.Linear(observation_shape, 256)
-        self.layer_goal = nn.Linear(2 * goal_shape, 256)
+        self.layer_goal = nn.Linear(goal_shape, 256)
         self.layer1 = nn.Linear(512, 256)
 
         self.layer_action = nn.Linear(action_shape, 256)
@@ -106,8 +106,8 @@ class QNetwork(nn.Module):
         return out
 
 
-item = namedtuple("experience_replay_item", ("obs", "des_goal", "ach_goal", "action",
-                                             "reward", "next_obs", "next_des_goal",
+item = namedtuple("experience_replay_item", ("ob", "des_goal", "ach_goal", "action",
+                                             "reward", "next_ob", "next_des_goal",
                                              "next_ach_goal", "done"))
 
 
@@ -118,7 +118,6 @@ class ExperienceReplay:
         self._next = 0
 
     def put(self, states, actions, rewards, next_states, dones):
-        # TODO: add state and goal normalization
         obs = states["observation"]
         des_goals = states["desired_goal"]
         ach_goals = states["achieved_goal"]
@@ -138,18 +137,19 @@ class ExperienceReplay:
             done = dones[i]
             reward = rewards[i]
 
-            if reward == -1.0 and done is True and random.random() < 0.2:
-                reward = 1
+            transition = self._get_transition(ob, des_goal, ach_goal, action, reward, next_ob,
+                                              next_des_goal, next_ach_goal, done)
 
             if self._next >= len(self.data):
-                self.data.append(
-                    item(ob, des_goal, ach_goal, action, reward, next_ob, next_des_goal, next_ach_goal, done)
-                )
+                self.data.append(transition)
             else:
-                self.data[self._next] = item(ob, des_goal, ach_goal, action, -0.1,
-                                             next_ob, next_des_goal, next_ach_goal, done)
+                self.data[self._next] = transition
 
             self._next = (self._next + 1) % self.size
+
+    @staticmethod
+    def _get_transition(ob, des_goal, ach_goal, action, reward, next_ob, next_des_goal, next_ach_goal, done):
+        return item(ob, des_goal, ach_goal, action, reward, next_ob, next_des_goal, next_ach_goal, done)
 
     def save(self, filename):
         with open(filename, 'wb') as f:
@@ -164,12 +164,12 @@ class ExperienceReplay:
         idxs = np.random.choice(len(self.data), batch_size, replace=False)
         for idx in idxs:
             sample = self.data[idx]
-            O.append(sample.obs)
+            O.append(sample.ob)
             G_d.append(sample.des_goal)
             G_a.append(sample.ach_goal)
             A.append(sample.action)
             R.append(sample.reward)
-            O_n.append(sample.next_obs)
+            O_n.append(sample.next_ob)
             G_d_n.append(sample.next_des_goal)
             G_a_n.append(sample.next_ach_goal)
             dones.append(sample.done)
@@ -188,6 +188,110 @@ class ExperienceReplay:
 
     def __len__(self):
         return len(self.data)
+
+
+class HindsightExperienceReplay:
+    def __init__(self, n_envs, k=8, size=1000000):
+        self.size = size
+        self.data = []
+        self._next = 0
+        self.n_envs = n_envs
+        self.k = k
+
+        self.episode_data = self._get_episode_data()
+
+    def __len__(self):
+        return len(self.data)
+
+    def _get_episode_data(self):
+        return [{"obs": [],
+                 "actions": [],
+                 "goals": [],
+                 "ach_goals": [],
+                 "next_obs": [],
+                 "next_ach_goals": [],
+                 "rewards": [],
+                 "dones": []} for _ in range(self.n_envs)]
+
+    def collect_episodes(self, states, actions, rewards, next_states, dones):
+        obs = states["observation"]
+        goals = states["desired_goal"]
+        ach_goals = states["achieved_goal"]
+        next_obs = next_states["observation"]
+        next_ach_goals = next_states["achieved_goal"]
+
+        for n in range(self.n_envs):
+            self.episode_data[n]["obs"].append(obs[n])
+            self.episode_data[n]["goals"].append(goals[n])
+            self.episode_data[n]["ach_goals"].append(ach_goals[n])
+            self.episode_data[n]["actions"].append(actions[n])
+            self.episode_data[n]["rewards"].append(rewards[n])
+            self.episode_data[n]["next_obs"].append(next_obs[n])
+            self.episode_data[n]["next_ach_goals"].append(next_ach_goals[n])
+            self.episode_data[n]["dones"].append(dones[n])
+
+    def store_episodes(self):
+        for n in range(self.n_envs):
+            T = len(self.episode_data[n]["obs"])
+            for t in range(T):
+                # Random k indices (in relative form), greater than current timestep t, where we substitute goal
+                # and achieved goal, plus current timestep t to store ordinary transition
+                # In the corner case (when number of remaining timesteps is less than self.k)
+                # we decrease amount of indices
+                number_of_indices = self.k if t < (T - self.k) else T - t - 1
+                idxs = [0] + np.random.choice(np.arange(1, T - t), number_of_indices, replace=False).tolist()
+                for idx in idxs:
+                    ob = self.episode_data[n]["obs"][t + idx]
+                    ach_goal = self.episode_data[n]["ach_goals"][t + idx]
+                    goal = self.episode_data[n]["goals"][t + idx] if idx == 0 else ach_goal
+                    action = self.episode_data[n]["actions"][t + idx]
+                    reward = self.episode_data[n]["rewards"][t + idx] if idx == 0 else 1.0
+                    next_ob = self.episode_data[n]["next_obs"][t + idx]
+                    next_ach_goal = self.episode_data[n]["next_ach_goals"][t + idx]
+                    done = self.episode_data[n]["dones"][t + idx]
+                    transition = item(ob, goal, ach_goal, action, reward, next_ob, goal, next_ach_goal, done)
+                    self.store_transition(transition)
+
+        self.episode_data = self._get_episode_data()
+
+    def store_transition(self, transition):
+        if self._next >= len(self.data):
+            self.data.append(transition)
+        else:
+            self.data[self._next] = transition
+
+        self._next = (self._next + 1) % self.size
+
+    def sample(self, batch_size):
+        O, G_d, G_a = [], [], []
+        A = []
+        R = []
+        O_n, G_d_n, G_a_n = [], [], []
+        dones = []
+        idxs = np.random.choice(len(self.data), batch_size, replace=False)
+        for idx in idxs:
+            sample = self.data[idx]
+            O.append(torch.FloatTensor(sample.ob))
+            G_d.append(torch.FloatTensor(sample.des_goal))
+            G_a.append(torch.FloatTensor(sample.ach_goal))
+            A.append(torch.FloatTensor(sample.action))
+            R.append(torch.FloatTensor([sample.reward]))
+            O_n.append(torch.FloatTensor(sample.next_ob))
+            G_d_n.append(torch.FloatTensor(sample.next_des_goal))
+            G_a_n.append(torch.FloatTensor(sample.next_ach_goal))
+            dones.append(torch.FloatTensor([sample.done]))
+
+        O = torch.stack(O).to('cuda')
+        G_d = torch.stack(G_d).to('cuda')
+        G_a = torch.stack(G_a).to('cuda')
+        A = torch.stack(A).to('cuda')
+        R = torch.FloatTensor(R).to('cuda')
+        O_n = torch.stack(O_n).to('cuda')
+        G_d_n = torch.stack(G_d_n).to('cuda')
+        G_a_n = torch.stack(G_a_n).to('cuda')
+        dones = torch.FloatTensor(dones).to('cuda')
+
+        return O, G_d, G_a, A, R[:, np.newaxis], O_n, G_d_n, G_a_n, dones[:, np.newaxis]
 
 
 class DistanceLogging:
@@ -218,5 +322,30 @@ class DistanceLogging:
             os.mkdir('./figures')
 
         plt.savefig(f'./figures/{filename}')
+
+
+class Normalizer:
+    def __init__(self, size):
+        self.size = size
+        self.mean = np.zeros(size, dtype='float32')
+        self.std = np.ones(size, dtype='float32')
+
+    def normalize(self, inputs):
+        return (inputs - self.mean) / self.std
+
+    def update_stats(self, inputs):
+        # inputs.shape = [batch_size, obs_shape]
+        assert len(inputs.shape) == 2
+        assert inputs.shape[1] == self.size
+        inputs_mean = np.mean(inputs, axis=0)
+        inputs_std = np.std(inputs, axis=0)
+
+        self.std = np.sqrt(0.5 * (self.std**2 + inputs_std**2) + 0.25 * (self.mean - inputs_mean)**2)
+        self.mean = 0.5 * (self.mean + inputs_mean)
+
+        assert self.std.all() > 1e-4
+        assert len(self.mean.shape) == 1
+        assert self.mean.shape[0] == self.size
+        assert self.std.shape[0] == self.size
 
 

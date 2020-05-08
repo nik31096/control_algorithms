@@ -1,6 +1,6 @@
 import torch
 
-from robotics.SAC.utils import QNetwork, ValueNetwork, PolicyNetwork
+from robotics.SAC.utils import QNetwork, ValueNetwork, PolicyNetwork, Normalizer
 
 import os
 
@@ -167,6 +167,9 @@ class SACAgent_v1:
         self.mode = mode
         self.device = train_device
 
+        self.obs_norm = Normalizer(observation_space_shape)
+        self.goal_norm = Normalizer(goal_space_shape)
+
         self.q_network_1 = QNetwork(observation_space_shape, goal_space_shape, action_space_shape).to(self.device)
         self.q_network_2 = QNetwork(observation_space_shape, goal_space_shape, action_space_shape).to(self.device)
 
@@ -192,10 +195,21 @@ class SACAgent_v1:
         self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=alpha_lr)
 
     def select_action(self, states, mode='train'):
-        observations = torch.FloatTensor(states['observation'])
-        desired_goals = torch.FloatTensor(states['desired_goal'])
-        achieved_goals = torch.FloatTensor(states['achieved_goal'])
-        goals = torch.cat([desired_goals, achieved_goals], dim=-1)
+        observations = states['observation']
+        desired_goals = states['desired_goal']
+        achieved_goals = states['achieved_goal']
+        goals = desired_goals - achieved_goals
+
+        if mode == 'train':
+            self.obs_norm.update_stats(observations)
+            self.goal_norm.update_stats(goals)
+
+        observations = self.obs_norm.normalize(observations)
+        goals = self.goal_norm.normalize(goals)
+
+        observations = torch.FloatTensor(observations)
+        goals = torch.FloatTensor(goals)
+
         if mode == 'train':
             actions, _ = self.online_policy_network(observations, goals, mode=mode)
         else:
@@ -207,8 +221,8 @@ class SACAgent_v1:
         self.q_1_opt.zero_grad()
         self.q_2_opt.zero_grad()
 
-        goals = torch.cat([des_goals, ach_goals], dim=-1)
-        next_goals = torch.cat([next_des_goals, next_ach_goals], dim=-1)
+        goals = des_goals - ach_goals
+        next_goals = next_des_goals - next_ach_goals
 
         next_actions, next_log_probs = self.policy_network(next_obs, next_goals)
         target_q_1_next = self.target_q_network_1(next_obs, next_goals, next_actions)
@@ -219,11 +233,11 @@ class SACAgent_v1:
 
         loss_1 = torch.mean(0.5*(self.q_network_1(obs, goals, actions) - q_hat)**2)
         loss_1.backward()
-        torch.nn.utils.clip_grad_norm_(self.q_network_1.parameters(), max_norm=0.1)
+        # torch.nn.utils.clip_grad_norm_(self.q_network_1.parameters(), max_norm=0.1)
         self.q_1_opt.step()
         loss_2 = torch.mean(0.5*(self.q_network_2(obs, goals, actions) - q_hat)**2)
         loss_2.backward()
-        torch.nn.utils.clip_grad_norm_(self.q_network_2.parameters(), max_norm=0.1)
+        # torch.nn.utils.clip_grad_norm_(self.q_network_2.parameters(), max_norm=0.1)
         self.q_2_opt.step()
 
         if 'cuda' in self.device:
@@ -232,14 +246,14 @@ class SACAgent_v1:
             return loss_1.data.numpy(), loss_2.data.numpy()
 
     def policy_network_update(self, obs, des_goals, ach_goals):
-        goals = torch.cat([des_goals, ach_goals], dim=-1)
+        goals = des_goals - ach_goals
         actions, log_probs = self.policy_network(obs, goals)
         q_1 = self.q_network_1(obs, goals, actions)
         q_2 = self.q_network_2(obs, goals, actions)
         q = torch.min(q_1, q_2)
         loss = torch.mean(self.alpha*log_probs - q)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=0.1)
+        # torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=0.1)
         self.policy_opt.step()
         self.policy_opt.zero_grad()
 
@@ -249,10 +263,10 @@ class SACAgent_v1:
             return loss.data.numpy()
 
     def alpha_update(self, obs, des_goals, ach_goals):
-        goals = torch.cat([des_goals, ach_goals], dim=-1)
+        goals = des_goals - ach_goals
         actions, log_probs = self.policy_network(obs, goals)
 
-        loss = -(self.log_alpha*(log_probs + self.target_entropy).detach()).mean()
+        loss = -(self.log_alpha * (log_probs + self.target_entropy).detach()).mean()
         loss.backward()
         self.alpha_optim.step()
         self.alpha_optim.zero_grad()
@@ -284,7 +298,7 @@ class SACAgent_v1:
     @staticmethod
     def _soft_update(online, target, tau):
         for target_param, param in zip(target.parameters(), online.parameters()):
-            target_param.data.copy_((1 - tau)*target_param + tau*param)
+            target_param.data.copy_((1 - tau)*target_param.data + tau*param.data)
 
     def save_models(self, model_name):
         if not os.path.exists('./weights'):
