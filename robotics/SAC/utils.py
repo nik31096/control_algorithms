@@ -85,6 +85,7 @@ class PolicyNetwork(nn.Module):
         mu, log_sigma = self.forward(observations, goals)
 
         if evaluate:
+            # print(log_sigma.exp().cpu().data.numpy())
             return torch.tanh(mu) * self.action_scale + self.action_bias
 
         sigma = log_sigma.exp()
@@ -97,7 +98,7 @@ class PolicyNetwork(nn.Module):
         log_prob = distribution.log_prob(x_t)
         # from SAC paper original, page 12
         log_prob -= torch.log(self.action_scale*(1 - y_t.pow(2)) + eps)
-        # log_prob = torch.sum(log_prob, dim=1, keepdim=True)
+        log_prob = torch.sum(log_prob, dim=1, keepdim=True)
 
         return action, log_prob
 

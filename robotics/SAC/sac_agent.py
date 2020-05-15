@@ -4,6 +4,7 @@ import numpy as np
 from robotics.SAC.utils import QNetwork, PolicyNetwork, Normalizer
 
 import os
+from copy import deepcopy
 
 
 class SACAgent_v1:
@@ -19,13 +20,13 @@ class SACAgent_v1:
                  alpha_lr,
                  policy_lr,
                  image_as_state=True,
-                 train_device='cuda',
+                 device='cuda',
                  mode='multi_env'
                  ):
         self.gamma = gamma
         self.tau = tau
         self.mode = mode
-        self.device = train_device
+        self.device = device
         include_conv = image_as_state
 
         # TODO: maybe add unique seeds for each environment acting
@@ -41,13 +42,8 @@ class SACAgent_v1:
         self.q_1_opt = torch.optim.Adam(self.q_network_1.parameters(), lr=q_lr)
         self.q_2_opt = torch.optim.Adam(self.q_network_2.parameters(), lr=q_lr)
 
-        self.target_q_network_1 = QNetwork(observation_space_shape, goal_space_shape,
-                                           action_space_shape, include_conv=include_conv).to(self.device)
-        self.target_q_network_2 = QNetwork(observation_space_shape, goal_space_shape,
-                                           action_space_shape, include_conv=include_conv).to(self.device)
-        # hard updates between target and online q network via tau = 1 in soft_update method
-        self._soft_update(self.target_q_network_1, self.q_network_1, tau=1)
-        self._soft_update(self.target_q_network_2, self.q_network_2, tau=1)
+        self.target_q_network_1 = deepcopy(self.q_network_1)
+        self.target_q_network_2 = deepcopy(self.q_network_2)
 
         self.policy_network = PolicyNetwork(observation_space_shape, goal_space_shape,
                                             action_space_shape, action_ranges, include_conv=include_conv).to(self.device)
@@ -93,7 +89,7 @@ class SACAgent_v1:
         action_scale = self.policy_network.action_scale
         action_bias = self.policy_network.action_bias
         actions = (actions - action_bias) / action_scale
-
+        # normalize observations and goals
         obs = self.obs_norm.normalize(obs, device=self.device)
         des_goals = self.goal_norm.normalize(des_goals, device=self.device)
         # ach_goals = self.goal_norm.normalize(ach_goals, device=self.device)
@@ -103,10 +99,6 @@ class SACAgent_v1:
 
         goals = des_goals  # - ach_goals
         next_goals = next_des_goals  # - next_ach_goals
-
-        # Q networks update
-        self.q_1_opt.zero_grad()
-        self.q_2_opt.zero_grad()
 
         with torch.no_grad():
             next_actions, next_log_probs = self.policy_network.sample(next_obs, next_goals)
@@ -136,7 +128,11 @@ class SACAgent_v1:
 
         policy_loss.backward()
         self.policy_opt.step()
+
+        # zero gradients of optimizers
         self.policy_opt.zero_grad()
+        self.q_1_opt.zero_grad()
+        self.q_2_opt.zero_grad()
 
         if update_alpha:
             actions, log_probs = self.policy_network.sample(obs, goals)
