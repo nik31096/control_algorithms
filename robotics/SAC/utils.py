@@ -85,7 +85,6 @@ class PolicyNetwork(nn.Module):
         mu, log_sigma = self.forward(observations, goals)
 
         if evaluate:
-            # print(log_sigma.exp().cpu().data.numpy())
             return torch.tanh(mu) * self.action_scale + self.action_bias
 
         sigma = log_sigma.exp()
@@ -245,7 +244,7 @@ class ExperienceReplay:
 
 
 class HindsightExperienceReplay:
-    def __init__(self, env_params, n_envs, k=8, size=20000, device='cuda'):
+    def __init__(self, env_params, n_envs, k=8, size=20000, use_achieved_goal=False, device='cuda'):
         self.env_params = env_params
         self.size = size
         self.data = {"obs": np.empty([size, env_params["max_episode_timesteps"], env_params['obs']]),
@@ -263,6 +262,7 @@ class HindsightExperienceReplay:
         self.reward_function = env_params['reward_function']
         self.device = device
         self.current_size = 0
+        self.use_achieved_goal = use_achieved_goal
 
         self.episode_data = self._get_episode_data()
 
@@ -360,7 +360,7 @@ class HindsightExperienceReplay:
         # transitions['dones'][her_indices] = np.ones_like(transitions['dones'][her_indices]).astype('bool')
 
         # Recompute rewards since we may have substituted the goal.
-        transitions['rewards'] = self.reward_function(transitions['ach_goals'],
+        transitions['rewards'] = self.reward_function(transitions['next_ach_goals'],
                                                       transitions['goals'], None)[:, np.newaxis]
 
         return transitions
@@ -380,16 +380,17 @@ class HindsightExperienceReplay:
         # for key in her_transitions.keys()}
 
         obs = torch.FloatTensor(transitions['obs']).to(self.device)
-        goals = torch.FloatTensor(transitions['goals']).to(self.device)
-        ach_goals = torch.FloatTensor(transitions['ach_goals']).to(self.device)
+        goals = transitions['goals'] - transitions['ach_goals'] if self.use_achieved_goal else transitions['goals']
+        goals = torch.FloatTensor(goals).to(self.device)
         actions = torch.FloatTensor(transitions['actions']).to(self.device)
         rewards = torch.FloatTensor(transitions['rewards']).to(self.device)
         next_obs = torch.FloatTensor(transitions['next_obs']).to(self.device)
-        next_goals = torch.FloatTensor(transitions['goals']).to(self.device)
-        next_ach_goals = torch.FloatTensor(transitions['next_ach_goals']).to(self.device)
+        next_goals = transitions['goals'] - transitions['next_ach_goals'] if self.use_achieved_goal \
+            else transitions['goals']
+        next_goals = torch.FloatTensor(next_goals).to(self.device)
         dones = torch.FloatTensor(transitions['dones']).to('cuda')
 
-        return obs, goals, ach_goals, actions, rewards, next_obs, next_goals, next_ach_goals, dones
+        return obs, goals, actions, rewards, next_obs, next_goals, dones
 
 
 class Normalizer:

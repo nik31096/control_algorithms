@@ -62,9 +62,7 @@ class SACAgent_v1:
         observations = states['observation']
         if self.mode == 'single_env' and len(observations.shape) == 3:
             observations = observations[np.newaxis, :, :, :]
-        desired_goals = states['desired_goal']
-        achieved_goals = states['achieved_goal']
-        goals = desired_goals  # - achieved_goals
+        goals = states['desired_goal'] - states['achieved_goal']
 
         if not evaluate:
             self.obs_norm.update_stats(observations)
@@ -84,21 +82,16 @@ class SACAgent_v1:
         return actions.cpu().data.numpy()
 
     def train(self, batch, update_alpha=True):
-        obs, des_goals, ach_goals, actions, rewards, next_obs, next_des_goals, next_ach_goals, dones = batch
+        obs, goals, actions, rewards, next_obs, next_goals, dones = batch
         # normalize actions
         action_scale = self.policy_network.action_scale
         action_bias = self.policy_network.action_bias
         actions = (actions - action_bias) / action_scale
         # normalize observations and goals
         obs = self.obs_norm.normalize(obs, device=self.device)
-        des_goals = self.goal_norm.normalize(des_goals, device=self.device)
-        # ach_goals = self.goal_norm.normalize(ach_goals, device=self.device)
+        goals = self.goal_norm.normalize(goals, device=self.device)
         next_obs = self.obs_norm.normalize(next_obs, device=self.device)
-        next_des_goals = self.goal_norm.normalize(next_des_goals, device=self.device)
-        # next_ach_goals = self.goal_norm.normalize(next_ach_goals, device=self.device)
-
-        goals = des_goals  # - ach_goals
-        next_goals = next_des_goals  # - next_ach_goals
+        next_goals = self.goal_norm.normalize(next_goals, device=self.device)
 
         with torch.no_grad():
             next_actions, next_log_probs = self.policy_network.sample(next_obs, next_goals)
@@ -118,7 +111,7 @@ class SACAgent_v1:
         q_1 = self.q_network_1(obs, goals, policy_actions)
         q_2 = self.q_network_2(obs, goals, policy_actions)
         q = torch.min(q_1, q_2)
-        policy_loss = torch.mean((self.alpha * log_probs) - q)
+        policy_loss = torch.mean((self.alpha * log_probs) - q) + torch.mean((policy_actions / action_scale).pow(2))
 
         q_1_loss.backward()
         self.q_1_opt.step()
@@ -142,7 +135,7 @@ class SACAgent_v1:
             self.alpha_optim.step()
             self.alpha_optim.zero_grad()
 
-            self.alpha = self.log_alpha.exp()
+            self.alpha = torch.clamp(self.log_alpha.exp(), min=1e-2, max=2)
 
         self._soft_update(self.target_q_network_1, self.q_network_1, self.tau)
         self._soft_update(self.target_q_network_2, self.q_network_2, self.tau)
@@ -184,8 +177,8 @@ class SACAgent_v1:
             raise IOError(f"No ./weights/{model_name} folder to load pretrained model")
 
         self.load_normalizer_parameters(model_name)
-        self.policy_network.load_state_dict(torch.load(f"./weights/{model_name}/policy_network.pt",
-                                                       map_location=lambda storage, loc: storage))
+        self.policy_network.load_state_dict(torch.load(f"./weights/{model_name}/policy_network.pt"))
+
         if evaluate:
             return
 

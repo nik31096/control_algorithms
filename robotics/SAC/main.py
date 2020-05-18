@@ -11,8 +11,8 @@ from robotics.SAC.sac_agent import SACAgent_v1
 from robotics.SAC.utils import ExperienceReplay, HindsightExperienceReplay
 from multiprocessing_environment.subproc_env import SubprocVecEnv
 
-# from mujoco_py import GlfwContext
-# GlfwContext(offscreen=True)
+from mujoco_py import GlfwContext
+GlfwContext(offscreen=True)
 
 
 def main(mode, device):
@@ -21,7 +21,7 @@ def main(mode, device):
     gamma = 0.999
     tau = 5e-3
     batch_size = 64
-    model_name = "fetch_reach_10"
+    model_name = "reach_5"
     writer_name = f"./runs/{model_name}"
 
     writer = SummaryWriter(writer_name)
@@ -34,11 +34,11 @@ def main(mode, device):
                 return env
             return _f
 
-        env_id = "FetchReach-v1"
-        n_envs = 8
+        env_id = "Reach-v1"
+        n_envs = 48
 
         envs = [make_env(env_id) for _ in range(n_envs)]
-        envs = SubprocVecEnv(envs, context='fork', in_series=1)
+        envs = SubprocVecEnv(envs, context='fork', in_series=4)
         states = envs.reset()
 
         test_env = gym.make(env_id)
@@ -48,7 +48,8 @@ def main(mode, device):
                       'reward_function': test_env.compute_reward,
                       'max_episode_timesteps': test_env._max_episode_steps}
 
-        replay_buffer = HindsightExperienceReplay(env_params=env_params, size=int(1e6 / n_envs), n_envs=n_envs, k=2)
+        replay_buffer = HindsightExperienceReplay(env_params=env_params, size=int(1e7 / n_envs), n_envs=n_envs,
+                                                  use_achieved_goal=True, k=8)
 
         agent = SACAgent_v1(observation_space_shape=envs.observation_space["observation"].shape[0],
                             goal_space_shape=envs.observation_space["achieved_goal"].shape[0],
@@ -56,7 +57,7 @@ def main(mode, device):
                             action_ranges=(envs.action_space.low[0], envs.action_space.high[0]),
                             gamma=gamma,
                             tau=tau,
-                            alpha=0.2,
+                            alpha=1,
                             q_lr=3e-4,
                             alpha_lr=3e-4,
                             policy_lr=3e-4,
@@ -66,9 +67,9 @@ def main(mode, device):
 
         pretrained = False
         if pretrained:
-            agent.load_pretrained_models('sac_1')
+            agent.load_pretrained_models('reach_1')
 
-        epoch_delay = 100
+        epoch_delay = 50
 
         for epoch in trange(n_epochs):
             for step in range(1000):
@@ -92,7 +93,7 @@ def main(mode, device):
                     writer.add_scalar("Mean_Q", mean_q, epoch*test_env._max_episode_steps + step)
                     writer.add_scalar("Entropy loss", entropy_loss, epoch)
                     writer.add_scalar("Alpha", alpha, epoch)
-                    writer.add_scalar("Success_rate", sum([_info['is_success'] for _info in info]) / n_envs,
+                    writer.add_scalar("Success_rate", round(sum([_info['is_success'] for _info in info]) / n_envs, 2),
                                       epoch*test_env._max_episode_steps + step)
 
                 states = next_states
@@ -101,7 +102,7 @@ def main(mode, device):
                     replay_buffer.store_episodes()
                     break
 
-            ep2log = 100
+            ep2log = 50
             if (epoch + 1) % ep2log == 0 and epoch > epoch_delay:
                 agent.save_models(model_name)
                 if not os.path.exists('./figures'):
@@ -118,9 +119,9 @@ def main(mode, device):
                     if done:
                         writer.add_scalar("Evaluation distance", distance, global_step=(epoch + 1) // ep2log)
                         writer.add_scalar("Episode reward sum", rewards_sum, global_step=(epoch + 1) // ep2log)
-                        # final_state_from_upper_camera = np.transpose(test_env.render(mode='rgb_array'), [2, 0, 1])
-                        # writer.add_image("Final_state_from_upper_camera", final_state_from_upper_camera,
-                        #                 global_step=(epoch + 1) // ep2log)
+                        final_state_from_upper_camera = np.transpose(test_env.render(mode='rgb_array'), [2, 0, 1])
+                        writer.add_image("Final_state_from_upper_camera", final_state_from_upper_camera,
+                                         global_step=(epoch + 1) // ep2log)
                         break
 
     else:
