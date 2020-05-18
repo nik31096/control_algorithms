@@ -1,5 +1,5 @@
 import gym
-import Reach_v0
+# import Reach_v0
 
 import numpy as np
 from tensorboardX import SummaryWriter
@@ -8,7 +8,7 @@ from tqdm import trange
 import os
 
 from robotics.DDPG.ddpg_agent import DDPGAgent
-from robotics.DDPG.utils import ExperienceReplay, DistanceLogging, HindsightExperienceReplay
+from robotics.DDPG.utils import ExperienceReplay, HindsightExperienceReplay
 from multiprocessing_environment.subproc_env import SubprocVecEnv
 
 # from mujoco_py import GlfwContext
@@ -21,9 +21,8 @@ def main(mode, device):
     gamma = 0.99
     tau = 5e-2
     batch_size = 256
-    model_name = "fetch_run_4"
+    model_name = "pick_run_1"
     writer_name = f"./runs/{model_name}"
-    distance_writer_name = model_name
 
     writer = SummaryWriter(writer_name)
 
@@ -37,8 +36,6 @@ def main(mode, device):
 
         env_id = "FetchReach-v1"
         n_envs = 8
-
-        distance_logger = DistanceLogging(n_envs)
 
         envs = [make_env(env_id) for _ in range(n_envs)]
         envs = SubprocVecEnv(envs, context='fork', in_series=1)

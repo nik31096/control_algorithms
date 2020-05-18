@@ -348,7 +348,7 @@ class HindsightExperienceReplay:
         # transitions['dones'][her_indices] = np.ones_like(transitions['dones'][her_indices]).astype('bool')
 
         # Recompute rewards since we may have substituted the goal.
-        transitions['rewards'] = self.reward_function(transitions['ach_goals'],
+        transitions['rewards'] = self.reward_function(transitions['next_ach_goals'],
                                                       transitions['goals'], None)[:, np.newaxis]
 
         return transitions
@@ -368,46 +368,17 @@ class HindsightExperienceReplay:
         # for key in her_transitions.keys()}
 
         obs = torch.FloatTensor(transitions['obs']).to(self.device)
-        goals = torch.FloatTensor(transitions['goals']).to(self.device)
-        ach_goals = torch.FloatTensor(transitions['ach_goals']).to(self.device)
+        goals = transitions['goals'] - transitions['ach_goals'] if self.use_achieved_goal else transitions['goals']
+        goals = torch.FloatTensor(goals).to(self.device)
         actions = torch.FloatTensor(transitions['actions']).to(self.device)
         rewards = torch.FloatTensor(transitions['rewards']).to(self.device)
         next_obs = torch.FloatTensor(transitions['next_obs']).to(self.device)
-        next_goals = torch.FloatTensor(transitions['goals']).to(self.device)
-        next_ach_goals = torch.FloatTensor(transitions['next_ach_goals']).to(self.device)
+        next_goals = transitions['goals'] - transitions['next_ach_goals'] if self.use_achieved_goal \
+            else transitions['goals']
+        next_goals = torch.FloatTensor(next_goals).to(self.device)
         dones = torch.FloatTensor(transitions['dones']).to('cuda')
 
-        return obs, goals, ach_goals, actions, rewards, next_obs, next_goals, next_ach_goals, dones
-
-
-class DistanceLogging:
-    def __init__(self, n_envs):
-        self.data = [[] for _ in range(n_envs)]
-
-    def put(self, index, value):
-        self.data[index].append(value)
-
-    def calculate_distances(self, states):
-        for i in range(len(self.data)):
-            distance = np.linalg.norm(states['desired_goal'][i] - states['achieved_goal'][i])
-            self.put(index=i, value=distance)
-
-    def save(self, filename):
-        with open(filename, 'wb') as f:
-            cloudpickle.dump(self.data, f)
-
-    def load(self, filename):
-        with open(filename, 'rb') as f:
-            self.data = cloudpickle.load(f)
-
-    def get_plot(self, filename):
-        for env in self.data:
-            plt.plot(env)
-
-        if not os.path.exists('./figures'):
-            os.mkdir('./figures')
-
-        plt.savefig(f'./figures/{filename}')
+        return obs, goals, actions, rewards, next_obs, next_goals, dones
 
 
 class Normalizer:

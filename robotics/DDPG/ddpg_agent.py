@@ -4,6 +4,7 @@ import numpy as np
 from robotics.DDPG.utils import QNetwork, PolicyNetwork, Normalizer
 
 import os
+from copy import deepcopy
 
 
 class DDPGAgent:
@@ -26,31 +27,16 @@ class DDPGAgent:
         self.device = device
         include_conv = image_as_state
 
-        # TODO: maybe add unique seeds for each environment acting
-        self.seeds = [0, 1996]
-
         self.obs_norm = Normalizer(observation_space_shape, multi_env=True if mode == 'multi_env' else False)
         self.goal_norm = Normalizer(goal_space_shape, multi_env=True if mode == 'multi_env' else False)
 
         self.q_network = QNetwork(observation_space_shape, goal_space_shape,
                                   action_space_shape, include_conv=include_conv).to(self.device)
-        self.target_q_network = QNetwork(observation_space_shape, goal_space_shape,
-                                         action_space_shape, include_conv=include_conv).to(self.device)
-        self.target_q_network.load_state_dict(self.q_network.state_dict())
+        self.target_q_network = deepcopy(self.q_network)
 
         self.policy_network = PolicyNetwork(observation_space_shape, goal_space_shape,
                                             action_space_shape, action_ranges, include_conv=include_conv).to(self.device)
-        self.target_policy_network = PolicyNetwork(observation_space_shape,
-                                                   goal_space_shape,
-                                                   action_space_shape,
-                                                   action_ranges,
-                                                   include_conv=include_conv).to(self.device)
-        self.online_policy_network = PolicyNetwork(observation_space_shape,
-                                                   goal_space_shape,
-                                                   action_space_shape,
-                                                   action_ranges,
-                                                   include_conv=include_conv)
-        self.online_policy_network.load_state_dict(self.policy_network.state_dict())
+        self.target_policy_network = deepcopy(self.policy_network)
 
         self.q_opt = torch.optim.Adam(self.q_network.parameters(), lr=q_lr)
         self.policy_opt = torch.optim.Adam(self.policy_network.parameters(), lr=policy_lr)
@@ -61,38 +47,33 @@ class DDPGAgent:
             observations = observations[np.newaxis, :, :, :]
         desired_goals = states['desired_goal']
         achieved_goals = states['achieved_goal']
-        goals = desired_goals  # - achieved_goals
+        goals = desired_goals - achieved_goals
 
         if not evaluate:
             self.obs_norm.update_stats(observations)
             self.goal_norm.update_stats(goals)
 
-        observations = torch.FloatTensor(self.obs_norm.normalize(observations))
-        goals = torch.FloatTensor(self.goal_norm.normalize(goals))
+        observations = torch.FloatTensor(self.obs_norm.normalize(observations)).to(self.device)
+        goals = torch.FloatTensor(self.goal_norm.normalize(goals)).to(self.device)
 
-        actions = self.online_policy_network.sample(observations, goals, noise=noise, evaluate=evaluate)
+        actions = self.policy_network.sample(observations, goals, noise=noise, evaluate=evaluate)
 
         if self.mode == 'single_env':
             actions = actions.squeeze()
 
-        return actions.data.numpy()
+        return actions.cpu().data.numpy()
 
     def train(self, batch):
-        obs, des_goals, ach_goals, actions, rewards, next_obs, next_des_goals, next_ach_goals, dones = batch
+        obs, goals, actions, rewards, next_obs, next_goals, dones = batch
         # normalize actions before Q network
         action_scale = self.policy_network.action_scale
         action_bias = self.policy_network.action_bias
         actions = (actions - action_bias) / action_scale
         # normalize observations and goals
         obs = self.obs_norm.normalize(obs, device=self.device)
-        des_goals = self.goal_norm.normalize(des_goals, device=self.device)
-        # ach_goals = self.goal_norm.normalize(ach_goals, device=self.device)
+        goals = self.goal_norm.normalize(goals, device=self.device)
         next_obs = self.obs_norm.normalize(next_obs, device=self.device)
-        next_des_goals = self.goal_norm.normalize(next_des_goals, device=self.device)
-        next_ach_goals = self.goal_norm.normalize(next_ach_goals, device=self.device)
-
-        goals = des_goals  # - ach_goals
-        next_goals = next_des_goals  # - next_ach_goals
+        next_goals = self.goal_norm.normalize(next_goals, device=self.device)
 
         # Q network update
         self.q_opt.zero_grad()
@@ -106,7 +87,6 @@ class DDPGAgent:
 
         q_loss = torch.mean(0.5 * (self.q_network(obs, goals, actions) - q_hat) ** 2)
         q_loss.backward()
-        # torch.nn.utils.clip_grad_norm_(self.q_network_1.parameters(), max_norm=0.1)
         self.q_opt.step()
 
         # Policy network update
@@ -114,22 +94,15 @@ class DDPGAgent:
         norm_policy_actions = (policy_actions - action_bias) / action_scale
         q = self.q_network(obs, goals, norm_policy_actions)
 
-        policy_loss = -torch.mean(q) + torch.mean(policy_actions / action_scale).pow(2)
-        # if epoch < 10000:
-        #    policy_loss -= policy_loss.cpu().data.numpy()*0.06*torch.mean(0.5*policy_actions.pow(2))
+        # Try to minimize action components mean to reach the goal with min possible control
+        policy_loss = -torch.mean(q) + torch.mean(policy_actions.pow(2))
 
         policy_loss.backward()
-        # torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=0.1)
         self.policy_opt.step()
         self.policy_opt.zero_grad()
 
         self._soft_update(self.target_q_network, self.q_network, self.tau)
         self._soft_update(self.target_policy_network, self.policy_network, self.tau)
-
-        # check online cpu policy network location and copy trained weights into it to play in the environment
-        self.online_policy_network.load_state_dict(self.policy_network.state_dict())
-        assert self.online_policy_network.layer2.weight.device == torch.device('cpu'), \
-            "Online network was placed on cuda or somewhere else. Please check the location!"
 
         return q_loss, policy_loss
 
@@ -165,12 +138,10 @@ class DDPGAgent:
 
         if evaluate:
             self.load_normalizer_parameters(model_name)
-            self.online_policy_network.load_state_dict(torch.load(f"./weights/{model_name}/policy_network.pt",
-                                                       map_location=lambda storage, loc: storage))
+            self.policy_network.load_state_dict(torch.load(f"./weights/{model_name}/policy_network.pt",
+                                                map_location=lambda storage, loc: storage))
             return
 
-        self.policy_network.load_state_dict(torch.load(f"./weights/{model_name}/policy_network.pt",
-                                                       map_location=lambda storage, loc: storage))
         self.q_network.load_state_dict(torch.load(f"./weights/{model_name}/q_network.pt",
                                                   map_location=lambda storage, loc: storage))
         self.target_q_network.load_state_dict(torch.load(f"./weights/{model_name}/target_q_network.pt",
