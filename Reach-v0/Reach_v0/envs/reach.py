@@ -280,8 +280,11 @@ class Reach2DEnv(gym.GoalEnv):
 
 
 class ReachEnv_v0(Reach2DEnv, EzPickle):
+    '''
+        Environment contains 2 link robot arm with joint limits and observation is 256x256x3 image
+    '''
     def __init__(self):
-        model_path = '/home/nik/PycharmProjects/deep_RL/Reach-v0/Reach_v0/envs/assets/manipulator.xml'
+        model_path = 'manipulator.xml'
         n_actions = 2
         n_substeps = 30
         distance_threshold = 0.03
@@ -298,8 +301,12 @@ class ReachEnv_v0(Reach2DEnv, EzPickle):
 
 
 class ReachEnv_v1(Reach2DEnv, EzPickle):
+    '''
+        Environment contains 2 link robot arm with joint limits and observation is
+        4d vector which consists of (theta1, theta1_dot, theta2, theta2_dot) components
+    '''
     def __init__(self):
-        model_path = '/home/nik/PycharmProjects/deep_RL/Reach-v0/Reach_v0/envs/assets/manipulator.xml'
+        model_path = 'manipulator.xml'
         n_actions = 2
         self.n_substeps = 20
         distance_threshold = 0.1
@@ -317,12 +324,15 @@ class ReachEnv_v1(Reach2DEnv, EzPickle):
 
 
 class ReachEnv_v2(Reach2DEnv, EzPickle):
+    '''
+        Environment contains 2 link robot arm without joint limits and observation is
+        4d vector which consists of (theta1, theta1_dot, theta2, theta2_dot) components
+    '''
     def __init__(self):
-        model_path = '/home/nik/PycharmProjects/deep_RL/Reach-v0/Reach_v0/envs/assets/' \
-                     'manipulator_without_joint_limits.xml.xml'
+        model_path = 'manipulator_without_joint_limits.xml'
         n_actions = 2
         n_substeps = 20
-        distance_threshold = 0.1
+        distance_threshold = 0.08
 
         Reach2DEnv.__init__(self,
                             model_path=model_path,
@@ -332,14 +342,19 @@ class ReachEnv_v2(Reach2DEnv, EzPickle):
                             initial_qpos={'joint_1': 0, 'joint_2': 0},
                             state_form='angles',
                             limited_goal_area=False,
-                            dynamical_goal=False
+                            dynamical_goal=True
                             )
         EzPickle.__init__(self)
 
 
 class ReachEnv_v3(Reach2DEnv, EzPickle):
+    '''
+        Environment contains 2 link robot arm without joint limits and observation is
+        4d vector which consists of (theta1, theta1_dot, theta2, theta2_dot) components.
+        Also there is an obstacle which is blue heavy cylinder standing vertically.
+    '''
     def __init__(self):
-        model_path = '/home/nik/PycharmProjects/deep_RL/Reach-v0/Reach_v0/envs/assets/manipulator_with_obstacle.xml'
+        model_path = 'manipulator_with_obstacle.xml'
         n_actions = 2
         n_substeps = 20
         distance_threshold = 0.1
