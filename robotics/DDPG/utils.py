@@ -6,8 +6,6 @@ from torch.distributions import Normal
 import numpy as np
 from collections import namedtuple
 import cloudpickle
-from matplotlib import pyplot as plt
-import os
 
 
 class Flatten(nn.Module):
@@ -237,7 +235,7 @@ class HindsightExperienceReplay:
         self.env_params = env_params
         self.size = size
         self.data = {"obs": np.empty([size, env_params["max_episode_timesteps"], env_params['obs']]),
-                     "actions": np.empty([size, env_params["max_episode_timesteps"], env_params['actions']]),
+                     "weights": np.empty([size, env_params["max_episode_timesteps"], env_params['weights']]),
                      "goals": np.empty([size, env_params["max_episode_timesteps"], env_params['goals']]),
                      "ach_goals": np.empty([size, env_params["max_episode_timesteps"], env_params['goals']]),
                      "next_obs": np.empty([size, env_params["max_episode_timesteps"], env_params['obs']]),
@@ -256,7 +254,7 @@ class HindsightExperienceReplay:
 
     def _get_episode_data(self):
         return {"obs": [[] for _ in range(self.n_envs)],
-                "actions": [[] for _ in range(self.n_envs)],
+                "weights": [[] for _ in range(self.n_envs)],
                 "goals": [[] for _ in range(self.n_envs)],
                 "ach_goals": [[] for _ in range(self.n_envs)],
                 "next_obs": [[] for _ in range(self.n_envs)],
@@ -276,7 +274,7 @@ class HindsightExperienceReplay:
             self.episode_data["obs"][n].append(obs[n])
             self.episode_data["goals"][n].append(goals[n])
             self.episode_data["ach_goals"][n].append(ach_goals[n])
-            self.episode_data["actions"][n].append(actions[n])
+            self.episode_data["weights"][n].append(actions[n])
             self.episode_data["rewards"][n].append([rewards[n]])
             self.episode_data["next_obs"][n].append(next_obs[n])
             self.episode_data["next_ach_goals"][n].append(next_ach_goals[n])
@@ -286,7 +284,7 @@ class HindsightExperienceReplay:
         obs = np.array(self.episode_data['obs'])
         goals = np.array(self.episode_data['goals'])
         ach_goals = np.array(self.episode_data['ach_goals'])
-        actions = np.array(self.episode_data['actions'])
+        actions = np.array(self.episode_data['weights'])
         rewards = np.array(self.episode_data['rewards'])
         next_obs = np.array(self.episode_data['next_obs'])
         next_ach_goals = np.array(self.episode_data['next_ach_goals'])
@@ -296,7 +294,7 @@ class HindsightExperienceReplay:
         self.data['obs'][idx] = obs
         self.data['goals'][idx] = goals
         self.data['ach_goals'][idx] = ach_goals
-        self.data['actions'][idx] = actions
+        self.data['weights'][idx] = actions
         self.data['rewards'][idx] = rewards
         self.data['next_obs'][idx] = next_obs
         self.data['next_ach_goals'][idx] = next_ach_goals
@@ -353,24 +351,13 @@ class HindsightExperienceReplay:
 
         return transitions
 
-    def _sample(self, batch_size):
-        # Standard experience replay sampling
-        episode_idx = np.random.randint(0, self.current_size, batch_size)
-        timestep_idx = np.random.randint(0, self.env_params['max_episode_timesteps'], batch_size)
-        transitions = {key: self.data[key][episode_idx, timestep_idx] for key in self.data.keys()}
-
-        return transitions
-
     def sample(self, batch_size):
         transitions = self.her_sample(batch_size)
-        # ordinary_transitions = self._sample(batch_size)
-        # transitions = {key: np.concatenate([her_transitions[key], ordinary_transitions[key]])
-        # for key in her_transitions.keys()}
 
         obs = torch.FloatTensor(transitions['obs']).to(self.device)
         goals = transitions['goals'] - transitions['ach_goals'] if self.use_achieved_goal else transitions['goals']
         goals = torch.FloatTensor(goals).to(self.device)
-        actions = torch.FloatTensor(transitions['actions']).to(self.device)
+        actions = torch.FloatTensor(transitions['weights']).to(self.device)
         rewards = torch.FloatTensor(transitions['rewards']).to(self.device)
         next_obs = torch.FloatTensor(transitions['next_obs']).to(self.device)
         next_goals = transitions['goals'] - transitions['next_ach_goals'] if self.use_achieved_goal \

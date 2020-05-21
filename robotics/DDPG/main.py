@@ -43,7 +43,7 @@ def main(mode, device):
 
         test_env = gym.make(env_id)
         env_params = {'obs': test_env.observation_space['observation'].shape[0],
-                      'actions': test_env.action_space.shape[0],
+                      'weights': test_env.action_space.shape[0],
                       'goals': test_env.observation_space['achieved_goal'].shape[0],
                       'reward_function': test_env.compute_reward,
                       'max_episode_timesteps': test_env._max_episode_steps}
@@ -70,7 +70,6 @@ def main(mode, device):
             for step in range(1000):
                 actions = agent.select_action(states, noise=True, evaluate=False)
                 next_states, rewards, dones, info = envs.step(actions)
-                # replay_buffer.put(states, actions, rewards, next_states, dones)
                 replay_buffer.collect_episodes(states, actions, rewards, next_states, dones)
                 states = next_states
                 if np.all(dones):
@@ -80,9 +79,9 @@ def main(mode, device):
                         # Training
                         for _ in range(40):
                             batch = replay_buffer.sample(batch_size)
-                            q_1_loss, policy_loss = agent.train(batch)
+                            q_loss, policy_loss = agent.train(batch)
 
-                        writer.add_scalar("Q1_loss", q_1_loss, epoch)
+                        writer.add_scalar("Q1_loss", q_loss, epoch)
                         writer.add_scalar("Policy_loss", policy_loss, epoch)
                         writer.add_scalar("Success_rate", sum([_info['is_success'] for _info in info]) / n_envs, epoch)
                     break
@@ -105,9 +104,6 @@ def main(mode, device):
                         writer.add_scalar("Evaluation distance", distance, global_step=(epoch + 1) // ep2log)
                         writer.add_scalar("Success", info['is_success'], global_step=(epoch + 1) // ep2log)
                         writer.add_scalar("Episode reward sum", rewards_sum, global_step=(epoch + 1) // ep2log)
-                        # final_state_from_upper_camera = np.transpose(test_env.render(mode='rgb_array'), [2, 0, 1])
-                        # writer.add_image("Final_state_from_upper_camera", final_state_from_upper_camera,
-                        #                 global_step=(epoch + 1) // ep2log)
                         break
 
     else:
@@ -134,7 +130,7 @@ def main(mode, device):
                 action = agent.select_action(state)
                 next_state, reward, done, info = env.step(action)
                 replay_buffer.put(state, action, reward, next_state, done)
-                # replay_buffer.collect_episodes(state, actions, rewards, next_states, dones)
+                # replay_buffer.collect_episodes(state, weights, rewards, next_states, dones)
                 state = next_state
                 if done:
                     # replay_buffer.store_episodes()

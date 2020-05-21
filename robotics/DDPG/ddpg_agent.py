@@ -65,7 +65,7 @@ class DDPGAgent:
 
     def train(self, batch):
         obs, goals, actions, rewards, next_obs, next_goals, dones = batch
-        # normalize actions before Q network
+        # normalize weights before Q network
         action_scale = self.policy_network.action_scale
         action_bias = self.policy_network.action_bias
         actions = (actions - action_bias) / action_scale
