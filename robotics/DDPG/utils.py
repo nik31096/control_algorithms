@@ -231,7 +231,7 @@ class ExperienceReplay:
 
 
 class HindsightExperienceReplay:
-    def __init__(self, env_params, n_envs, k=8, size=20000, device='cuda'):
+    def __init__(self, env_params, n_envs, k=8, size=20000, use_achieved_goal=False, device='cuda'):
         self.env_params = env_params
         self.size = size
         self.data = {"obs": np.empty([size, env_params["max_episode_timesteps"], env_params['obs']]),
@@ -249,6 +249,7 @@ class HindsightExperienceReplay:
         self.reward_function = env_params['reward_function']
         self.device = device
         self.current_size = 0
+        self.use_achieved_goal = use_achieved_goal
 
         self.episode_data = self._get_episode_data()
 
@@ -351,8 +352,19 @@ class HindsightExperienceReplay:
 
         return transitions
 
+    def _sample(self, batch_size):
+        # Standard experience replay sampling
+        episode_idx = np.random.randint(0, self.current_size, batch_size)
+        timestep_idx = np.random.randint(0, self.env_params['max_episode_timesteps'], batch_size)
+        transitions = {key: self.data[key][episode_idx, timestep_idx] for key in self.data.keys()}
+
+        return transitions
+
     def sample(self, batch_size):
         transitions = self.her_sample(batch_size)
+        # ordinary_transitions = self._sample(batch_size)
+        # transitions = {key: np.concatenate([her_transitions[key], ordinary_transitions[key]])
+        # for key in her_transitions.keys()}
 
         obs = torch.FloatTensor(transitions['obs']).to(self.device)
         goals = transitions['goals'] - transitions['ach_goals'] if self.use_achieved_goal else transitions['goals']

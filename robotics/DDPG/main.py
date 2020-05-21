@@ -48,7 +48,8 @@ def main(mode, device):
                       'reward_function': test_env.compute_reward,
                       'max_episode_timesteps': test_env._max_episode_steps}
 
-        replay_buffer = HindsightExperienceReplay(env_params=env_params, size=20000, n_envs=n_envs, k=4)
+        replay_buffer = HindsightExperienceReplay(env_params=env_params, size=20000, n_envs=n_envs, k=4,
+                                                  use_achieved_goal=True)
 
         agent = DDPGAgent(observation_space_shape=envs.observation_space["observation"].shape[0],
                           goal_space_shape=envs.observation_space["achieved_goal"].shape[0],
