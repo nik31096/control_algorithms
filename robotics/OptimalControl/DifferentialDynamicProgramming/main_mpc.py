@@ -1,7 +1,7 @@
 import gym
 import Reach_v0
 
-from robotics.OptimalControl.DDP import DDP_v1
+from robotics.OptimalControl.DifferentialDynamicProgramming.ddp_class import DDP_v2
 
 import numpy as np
 
@@ -14,7 +14,7 @@ print("Horizon", T)
 
 run_name = "ddp_2"
 
-ddp = DDP_v1(a1=100,
+ddp = DDP_v2(a1=1000,
              a2=10,
              a3=10,
              dynamics_model=env.get_next_state,
@@ -51,13 +51,9 @@ H = 20
 assert H <= ddp.pred_time
 iteration = 0
 while True:
-    restart_backward = True
-    while restart_backward:
-        k, K, restart_backward = ddp.backward(states, actions, iteration)
-
-    restart_forward = True
-    while restart_forward:
-        new_states, new_actions, restart_forward = ddp.forward(states, actions, k, K, iteration)
+    restart = True
+    while restart:
+        new_actions, restart = ddp.make_iteration(states, actions, iteration)
 
     for inner_time in range(H):
         next_state, reward, done, _ = env.step(new_actions[inner_time])
