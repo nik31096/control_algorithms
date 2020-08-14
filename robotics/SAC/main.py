@@ -11,8 +11,8 @@ from robotics.SAC.sac_agent import SACAgent_v1
 from robotics.SAC.utils import ExperienceReplay, HindsightExperienceReplay
 from multiprocessing_environment.subproc_env import SubprocVecEnv
 
-from mujoco_py import GlfwContext
-GlfwContext(offscreen=True)
+# from mujoco_py import GlfwContext
+# GlfwContext(offscreen=True)
 
 
 def main(mode, device):
@@ -21,7 +21,7 @@ def main(mode, device):
     gamma = 0.999
     tau = 5e-3
     batch_size = 64
-    model_name = "reach_5"
+    model_name = "pick_4"
     writer_name = f"./runs/{model_name}"
 
     writer = SummaryWriter(writer_name)
@@ -34,7 +34,7 @@ def main(mode, device):
                 return env
             return _f
 
-        env_id = "Reach-v1"
+        env_id = "FetchPickAndPlace-v1"
         n_envs = 48
 
         envs = [make_env(env_id) for _ in range(n_envs)]
@@ -48,8 +48,8 @@ def main(mode, device):
                       'reward_function': test_env.compute_reward,
                       'max_episode_timesteps': test_env._max_episode_steps}
 
-        replay_buffer = HindsightExperienceReplay(env_params=env_params, size=int(1e7 / n_envs), n_envs=n_envs,
-                                                  use_achieved_goal=True, k=8)
+        replay_buffer = HindsightExperienceReplay(env_params=env_params, size=int(1e6 / n_envs), n_envs=n_envs,
+                                                  use_achieved_goal=True, k=16)
 
         agent = SACAgent_v1(observation_space_shape=envs.observation_space["observation"].shape[0],
                             goal_space_shape=envs.observation_space["achieved_goal"].shape[0],
@@ -69,9 +69,9 @@ def main(mode, device):
         if pretrained:
             agent.load_pretrained_models('reach_1')
 
-        epoch_delay = 50
+        epoch_delay = 100
 
-        for epoch in trange(n_epochs):
+        for epoch in range(n_epochs):
             for step in range(1000):
                 if epoch < epoch_delay:
                     actions = np.array([envs.action_space.sample() for _ in range(n_envs)])
@@ -93,13 +93,15 @@ def main(mode, device):
                     writer.add_scalar("Mean_Q", mean_q, epoch*test_env._max_episode_steps + step)
                     writer.add_scalar("Entropy loss", entropy_loss, epoch)
                     writer.add_scalar("Alpha", alpha, epoch)
-                    writer.add_scalar("Success_rate", round(sum([_info['is_success'] for _info in info]) / n_envs, 2),
-                                      epoch*test_env._max_episode_steps + step)
+                    success_rate = round(sum([_info['is_success'] for _info in info]) / n_envs, 2)
+                    writer.add_scalar("Success_rate", success_rate, epoch*test_env._max_episode_steps + step)
 
                 states = next_states
                 if np.all(dones):
                     states = envs.reset()
                     replay_buffer.store_episodes()
+                    if (epoch + 1) % 50 == 0 and epoch > epoch_delay:
+                        print(f"Epoch: {epoch}, success_rate: {success_rate}")
                     break
 
             ep2log = 50
@@ -119,9 +121,7 @@ def main(mode, device):
                     if done:
                         writer.add_scalar("Evaluation distance", distance, global_step=(epoch + 1) // ep2log)
                         writer.add_scalar("Episode reward sum", rewards_sum, global_step=(epoch + 1) // ep2log)
-                        final_state_from_upper_camera = np.transpose(test_env.render(mode='rgb_array'), [2, 0, 1])
-                        writer.add_image("Final_state_from_upper_camera", final_state_from_upper_camera,
-                                         global_step=(epoch + 1) // ep2log)
+                        
                         break
 
     else:

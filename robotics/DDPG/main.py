@@ -1,5 +1,5 @@
 import gym
-# import Reach_v0
+import Reach_v0
 
 import numpy as np
 from tensorboardX import SummaryWriter
@@ -19,9 +19,9 @@ def main(mode, device):
     # hyperparameters and same code snippets for both modes
     n_epochs = 500000
     gamma = 0.99
-    tau = 5e-2
-    batch_size = 256
-    model_name = "pick_run_1"
+    tau = 5e-3
+    batch_size = 128
+    model_name = "reach_v1_3"
     writer_name = f"./runs/{model_name}"
 
     writer = SummaryWriter(writer_name)
@@ -34,11 +34,11 @@ def main(mode, device):
                 return env
             return _f
 
-        env_id = "FetchReach-v1"
-        n_envs = 8
+        env_id = "Reach-v1"
+        n_envs = 48
 
         envs = [make_env(env_id) for _ in range(n_envs)]
-        envs = SubprocVecEnv(envs, context='fork', in_series=1)
+        envs = SubprocVecEnv(envs, context='fork', in_series=4)
         states = envs.reset()
 
         test_env = gym.make(env_id)
@@ -48,7 +48,7 @@ def main(mode, device):
                       'reward_function': test_env.compute_reward,
                       'max_episode_timesteps': test_env._max_episode_steps}
 
-        replay_buffer = HindsightExperienceReplay(env_params=env_params, size=20000, n_envs=n_envs, k=4,
+        replay_buffer = HindsightExperienceReplay(env_params=env_params, size=30000, n_envs=n_envs, k=16,
                                                   use_achieved_goal=True)
 
         agent = DDPGAgent(observation_space_shape=envs.observation_space["observation"].shape[0],
@@ -57,17 +57,17 @@ def main(mode, device):
                           action_ranges=(envs.action_space.low[0], envs.action_space.high[0]),
                           gamma=gamma,
                           tau=tau,
-                          q_lr=1e-3,
-                          policy_lr=1e-3,
+                          q_lr=3e-4,
+                          policy_lr=3e-4,
                           device=device,
                           image_as_state=False
                           )
 
         pretrained = False
         if pretrained:
-            agent.load_pretrained_models('ddpg_1')
+            agent.load_pretrained_models('reach_1')
 
-        for epoch in trange(n_epochs):
+        for epoch in range(n_epochs):
             for step in range(1000):
                 actions = agent.select_action(states, noise=True, evaluate=False)
                 next_states, rewards, dones, info = envs.step(actions)
@@ -84,7 +84,10 @@ def main(mode, device):
 
                         writer.add_scalar("Q1_loss", q_loss, epoch)
                         writer.add_scalar("Policy_loss", policy_loss, epoch)
-                        writer.add_scalar("Success_rate", sum([_info['is_success'] for _info in info]) / n_envs, epoch)
+                        success_rate = round(sum([_info['is_success'] for _info in info]) / n_envs, 3)
+                        writer.add_scalar("Success_rate", success_rate, epoch)
+                        if (epoch + 1) % 100 == 0:
+                            print(f"## Epoch {epoch + 1}, success rate: {success_rate}")
                     break
 
             ep2log = 100

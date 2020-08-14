@@ -135,7 +135,7 @@ class SACAgent_v1:
             self.alpha_optim.step()
             self.alpha_optim.zero_grad()
 
-            self.alpha = torch.clamp(self.log_alpha.exp(), min=1e-2, max=2)
+            self.alpha = torch.clamp(self.log_alpha.exp(), min=2e-2, max=2)
 
         self._soft_update(self.target_q_network_1, self.q_network_1, self.tau)
         self._soft_update(self.target_q_network_2, self.q_network_2, self.tau)

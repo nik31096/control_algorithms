@@ -318,7 +318,7 @@ class ReachEnv_v1(Reach2DEnv, EzPickle):
                             distance_threshold=distance_threshold,
                             initial_qpos={'joint_1': 0, 'joint_2': 0},
                             state_form='angles',
-                            limited_goal_area=False
+                            limited_goal_area=True
                             )
         EzPickle.__init__(self)
 
