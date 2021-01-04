@@ -61,7 +61,7 @@ class DDPGAgent:
         if self.mode == 'single_env':
             actions = actions.squeeze()
 
-        return actions.cpu().data.numpy()
+        return actions
 
     def train(self, batch):
         obs, goals, actions, rewards, next_obs, next_goals, dones = batch

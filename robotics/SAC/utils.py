@@ -6,8 +6,6 @@ from torch.distributions import Normal
 import numpy as np
 from collections import namedtuple
 import cloudpickle
-from matplotlib import pyplot as plt
-import os
 
 MIN_LOG_SIGMA = -20
 MAX_LOG_SIGMA = 2
@@ -22,40 +20,12 @@ class Flatten(nn.Module):
         return x.view(x.shape[0], -1)
 
 
-class ConvModule(nn.Module):
-    def __init__(self):
-        super(ConvModule, self).__init__()
-        self.conv1 = nn.Conv2d(3, 8, kernel_size=(5, 5), stride=2, padding=2)  # 128
-        self.conv2 = nn.Conv2d(8, 16, kernel_size=(3, 3), stride=2, padding=1)  # 64
-        self.conv3 = nn.Conv2d(16, 32, kernel_size=(3, 3), stride=2, padding=1)  # 32
-        self.conv4 = nn.Conv2d(32, 64, kernel_size=(3, 3), stride=2, padding=1)  # 16
-        self.conv5 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=2, padding=1)  # 8
-        self.conv6 = nn.Conv2d(128, 32, kernel_size=(1, 1), stride=1, padding=0)  # 8
-        self.conv7 = nn.Conv2d(32, 32, kernel_size=(3, 3), stride=1, padding=1)  # (8, 8, 32)
-        self.flatten = Flatten()  # 8*8*32 = 2048
-
-    def forward(self, x):
-        out = F.leaky_relu(self.conv1(x))
-        out = F.leaky_relu(self.conv2(out))
-        out = F.leaky_relu(self.conv3(out))
-        out = F.leaky_relu(self.conv4(out))
-        out = F.leaky_relu(self.conv5(out))
-        out = F.leaky_relu(self.conv6(out))
-        out = F.leaky_relu(self.conv7(out))
-        out = self.flatten(out)
-
-        return out
-
-
 class PolicyNetwork(nn.Module):
-    def __init__(self, observation_shape, goal_shape, output_shape, action_ranges, include_conv=True):
+    def __init__(self, observation_shape, goal_shape, output_shape, action_ranges):
         super(PolicyNetwork, self).__init__()
         self.action_ranges = action_ranges
-        self.include_conv = include_conv
-        if include_conv:
-            self.conv_layers = ConvModule()
 
-        self.layer_obs = nn.Linear(2048 if include_conv else observation_shape, 200)
+        self.layer_obs = nn.Linear(observation_shape, 200)
         self.layer_goal = nn.Linear(goal_shape, 200)
         self.layer1 = nn.Linear(400, 100)
         self.layer2 = nn.Linear(100, output_shape)
@@ -65,8 +35,6 @@ class PolicyNetwork(nn.Module):
         self.action_bias = (action_ranges[1] + action_ranges[0]) / 2
 
     def forward(self, observation, goals):
-        if self.include_conv:
-            observation = self.conv_layers(observation)
         processed_obs = F.relu(self.layer_obs(observation))
         processed_goal = F.relu(self.layer_goal(goals))
         if len(processed_goal.shape) < len(processed_obs.shape):
@@ -103,13 +71,10 @@ class PolicyNetwork(nn.Module):
 
 
 class QNetwork(nn.Module):
-    def __init__(self, observation_shape, goal_shape, action_shape, include_conv=True):
+    def __init__(self, observation_shape, goal_shape, action_shape):
         super(QNetwork, self).__init__()
-        self.include_conv = include_conv
-        if include_conv:
-            self.conv_layers = ConvModule()
 
-        self.layer_obs = nn.Linear(2048 if include_conv else observation_shape, 256)
+        self.layer_obs = nn.Linear(observation_shape, 256)
         self.layer_goal = nn.Linear(goal_shape, 256)
         self.layer1 = nn.Linear(512, 256)
 
@@ -119,8 +84,6 @@ class QNetwork(nn.Module):
         self.layer3 = nn.Linear(256, 1)
 
     def forward(self, observation, goal, action):
-        if self.include_conv:
-            observation = self.conv_layers(observation)
         obs = F.leaky_relu(self.layer_obs(observation))
         goal_ = F.leaky_relu(self.layer_goal(goal))
         obs_goal = torch.cat([obs, goal_], dim=-1)
@@ -248,7 +211,7 @@ class HindsightExperienceReplay:
         self.env_params = env_params
         self.size = size
         self.data = {"obs": np.empty([size, env_params["max_episode_timesteps"], env_params['obs']]),
-                     "actions": np.empty([size, env_params["max_episode_timesteps"], env_params['actions']]),
+                     "weights": np.empty([size, env_params["max_episode_timesteps"], env_params['weights']]),
                      "goals": np.empty([size, env_params["max_episode_timesteps"], env_params['goals']]),
                      "ach_goals": np.empty([size, env_params["max_episode_timesteps"], env_params['goals']]),
                      "next_obs": np.empty([size, env_params["max_episode_timesteps"], env_params['obs']]),
@@ -268,7 +231,7 @@ class HindsightExperienceReplay:
 
     def _get_episode_data(self):
         return {"obs": [[] for _ in range(self.n_envs)],
-                "actions": [[] for _ in range(self.n_envs)],
+                "weights": [[] for _ in range(self.n_envs)],
                 "goals": [[] for _ in range(self.n_envs)],
                 "ach_goals": [[] for _ in range(self.n_envs)],
                 "next_obs": [[] for _ in range(self.n_envs)],
@@ -288,7 +251,7 @@ class HindsightExperienceReplay:
             self.episode_data["obs"][n].append(obs[n])
             self.episode_data["goals"][n].append(goals[n])
             self.episode_data["ach_goals"][n].append(ach_goals[n])
-            self.episode_data["actions"][n].append(actions[n])
+            self.episode_data["weights"][n].append(actions[n])
             self.episode_data["rewards"][n].append([rewards[n]])
             self.episode_data["next_obs"][n].append(next_obs[n])
             self.episode_data["next_ach_goals"][n].append(next_ach_goals[n])
@@ -298,7 +261,7 @@ class HindsightExperienceReplay:
         obs = np.array(self.episode_data['obs'])
         goals = np.array(self.episode_data['goals'])
         ach_goals = np.array(self.episode_data['ach_goals'])
-        actions = np.array(self.episode_data['actions'])
+        actions = np.array(self.episode_data['weights'])
         rewards = np.array(self.episode_data['rewards'])
         next_obs = np.array(self.episode_data['next_obs'])
         next_ach_goals = np.array(self.episode_data['next_ach_goals'])
@@ -308,7 +271,7 @@ class HindsightExperienceReplay:
         self.data['obs'][idx] = obs
         self.data['goals'][idx] = goals
         self.data['ach_goals'][idx] = ach_goals
-        self.data['actions'][idx] = actions
+        self.data['weights'][idx] = actions
         self.data['rewards'][idx] = rewards
         self.data['next_obs'][idx] = next_obs
         self.data['next_ach_goals'][idx] = next_ach_goals
@@ -382,7 +345,7 @@ class HindsightExperienceReplay:
         obs = torch.FloatTensor(transitions['obs']).to(self.device)
         goals = transitions['goals'] - transitions['ach_goals'] if self.use_achieved_goal else transitions['goals']
         goals = torch.FloatTensor(goals).to(self.device)
-        actions = torch.FloatTensor(transitions['actions']).to(self.device)
+        actions = torch.FloatTensor(transitions['weights']).to(self.device)
         rewards = torch.FloatTensor(transitions['rewards']).to(self.device)
         next_obs = torch.FloatTensor(transitions['next_obs']).to(self.device)
         next_goals = transitions['goals'] - transitions['next_ach_goals'] if self.use_achieved_goal \

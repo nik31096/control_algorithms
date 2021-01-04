@@ -89,6 +89,54 @@ class PolicyNetwork(nn.Module):
         return action
 
 
+class PolicyNetwork_v1(nn.Module):
+    def __init__(self, observation_shape, goal_shape, output_shape, action_ranges, include_conv=True):
+        super(PolicyNetwork_v1, self).__init__()
+        self.action_ranges = action_ranges
+        self.include_conv = include_conv
+        if include_conv:
+            self.conv_layers = ConvModule()
+
+        self.layer_obs = nn.Linear(2048 if include_conv else observation_shape, 200)
+        self.layer_goal = nn.Linear(goal_shape, 200)
+        self.layer1 = nn.Linear(400, 256)
+        self.layer2 = nn.Linear(256, 256)
+        self.layer3 = nn.Linear(256, output_shape)
+
+        self.action_scale = (action_ranges[1] - action_ranges[0]) / 2
+        self.action_bias = (action_ranges[1] + action_ranges[0]) / 2
+
+        self.noise = Normal(0, 2*self.action_scale)
+
+    def forward(self, observation, goals):
+        if self.include_conv:
+            observation = self.conv_layers(observation)
+        processed_obs = F.relu(self.layer_obs(observation))
+        processed_goal = F.relu(self.layer_goal(goals))
+        if len(processed_goal.shape) < len(processed_obs.shape):
+            processed_goal = processed_goal[np.newaxis, :]
+
+        out = torch.cat([processed_obs, processed_goal], dim=-1)
+        out = F.relu(self.layer1(out))
+        out = F.leaky_relu(self.layer2(out))
+        action = self.layer3(out)
+
+        return action
+
+    def sample(self, observations, goals, noise=True, evaluate=False):
+        action = self.forward(observations, goals)
+
+        if noise:
+            action += self.noise.sample(sample_shape=action.shape).to(action.device)
+            action = torch.tanh(action) * self.action_scale + self.action_bias
+        elif evaluate:
+            action = torch.tanh(action) * self.action_scale + self.action_bias
+        else:
+            action = torch.tanh(action)
+
+        return action
+
+
 class QNetwork(nn.Module):
     def __init__(self, observation_shape, goal_shape, action_shape, include_conv=True):
         super(QNetwork, self).__init__()
@@ -123,12 +171,11 @@ class QNetwork(nn.Module):
         return out
 
 
-item = namedtuple("experience_replay_item", ("ob", "des_goal", "ach_goal", "action",
-                                             "reward", "next_ob", "next_des_goal",
-                                             "next_ach_goal", "done"))
-
-
 class ExperienceReplay:
+    item = namedtuple("experience_replay_item", ("ob", "des_goal", "ach_goal", "action",
+                                                 "reward", "next_ob", "next_des_goal",
+                                                 "next_ach_goal", "done"))
+
     def __init__(self, size=100000, mode='multi_env', device='cuda'):
         self.size = size
         self.data = []
@@ -189,7 +236,7 @@ class ExperienceReplay:
 
     @staticmethod
     def _get_transition(ob, des_goal, ach_goal, action, reward, next_ob, next_des_goal, next_ach_goal, done):
-        return item(ob, des_goal, ach_goal, action, reward, next_ob, next_des_goal, next_ach_goal, done)
+        return ExperienceReplay.item(ob, des_goal, ach_goal, action, reward, next_ob, next_des_goal, next_ach_goal, done)
 
     def save(self, filename):
         with open(filename, 'wb') as f:
@@ -228,6 +275,86 @@ class ExperienceReplay:
 
     def __len__(self):
         return len(self.data)
+
+
+class ExperienceReplay_v1:
+    item = namedtuple("experience_replay_item", ("ob", "action", "reward", "next_ob", "done"))
+
+    def __init__(self, size=100000, mode='multi_env', device='cuda'):
+        self.size = size
+        self.data = []
+        self._next = 0
+        self.mode = mode
+        self.device = device
+
+    def put(self, states, actions, rewards, next_states, dones):
+
+        if self.mode == 'single_env':
+            ob = torch.FloatTensor(states)
+            action = torch.FloatTensor(actions)
+            next_ob = torch.FloatTensor(next_states)
+            done = dones
+            reward = rewards
+            transition = self._get_transition(ob, action, reward, next_ob, done)
+            if self._next >= len(self.data):
+                self.data.append(transition)
+            else:
+                self.data[self._next] = transition
+
+            self._next = (self._next + 1) % self.size
+
+            return
+        else:
+            for i in range(states.shape[0]):
+                ob = torch.FloatTensor(states[i])
+                action = torch.FloatTensor(actions[i])
+                next_ob = torch.FloatTensor(next_states[i])
+                done = dones[i]
+                reward = rewards[i]
+
+                transition = self._get_transition(ob, action, reward, next_ob, done)
+
+                if self._next >= len(self.data):
+                    self.data.append(transition)
+                else:
+                    self.data[self._next] = transition
+
+                self._next = (self._next + 1) % self.size
+
+    @staticmethod
+    def _get_transition(ob, action, reward, next_ob, done):
+        return ExperienceReplay_v1.item(ob, action, reward, next_ob, done)
+
+    def save(self, filename):
+        with open(filename, 'wb') as f:
+            cloudpickle.dump(self.data, f)
+
+    def sample(self, batch_size):
+        O = []
+        A = []
+        R = []
+        O_n = []
+        dones = []
+        idxs = np.random.choice(len(self.data), batch_size, replace=False)
+        for idx in idxs:
+            sample = self.data[idx]
+            O.append(sample.ob)
+            A.append(sample.action)
+            R.append(sample.reward)
+            O_n.append(sample.next_ob)
+            dones.append(sample.done)
+
+        O = torch.stack(O).to(self.device)
+        A = torch.stack(A).to(self.device)
+        R = torch.FloatTensor(R).to(self.device)
+        O_n = torch.stack(O_n).to(self.device)
+        dones = torch.FloatTensor(dones).to(self.device)
+
+        return O, A, R[:, np.newaxis], O_n, dones[:, np.newaxis]
+
+    def __len__(self):
+        return len(self.data)
+
 
 
 class HindsightExperienceReplay:

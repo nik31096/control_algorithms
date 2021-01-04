@@ -3,6 +3,8 @@ import Reach_v0
 
 from robotics.DDPG.ddpg_agent import DDPGAgent
 
+from torch.utils.tensorboard import SummaryWriter
+
 from argparse import ArgumentParser
 
 parser = ArgumentParser()
@@ -27,6 +29,7 @@ agent = DDPGAgent(env.observation_space['observation'].shape[0],
                   device='cpu'
                   )
 agent.load_pretrained_models(args.model_name, evaluate=True)
+state = env.reset()
 
 n_runs = args.n_runs
 success = 0
@@ -37,7 +40,7 @@ for _ in range(n_runs):
     while not done:
         action = agent.select_action(state, evaluate=True)
 
-        next_state, reward, done, info = env.step(action)
+        next_state, reward, done, info = env.step(action.cpu().data.numpy())
         if args.render:
             env.render()
         if done:

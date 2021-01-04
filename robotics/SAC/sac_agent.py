@@ -19,7 +19,6 @@ class SACAgent_v1:
                  q_lr,
                  alpha_lr,
                  policy_lr,
-                 image_as_state=True,
                  device='cuda',
                  mode='multi_env'
                  ):
@@ -27,7 +26,6 @@ class SACAgent_v1:
         self.tau = tau
         self.mode = mode
         self.device = device
-        include_conv = image_as_state
 
         # TODO: maybe add unique seeds for each environment acting
         self.seeds = [0, 1996]
@@ -35,10 +33,8 @@ class SACAgent_v1:
         self.obs_norm = Normalizer(observation_space_shape, multi_env=True if mode == 'multi_env' else False)
         self.goal_norm = Normalizer(goal_space_shape, multi_env=True if mode == 'multi_env' else False)
 
-        self.q_network_1 = QNetwork(observation_space_shape, goal_space_shape,
-                                    action_space_shape, include_conv=include_conv).to(self.device)
-        self.q_network_2 = QNetwork(observation_space_shape, goal_space_shape,
-                                    action_space_shape, include_conv=include_conv).to(self.device)
+        self.q_network_1 = QNetwork(observation_space_shape, goal_space_shape, action_space_shape).to(self.device)
+        self.q_network_2 = QNetwork(observation_space_shape, goal_space_shape, action_space_shape).to(self.device)
         self.q_1_opt = torch.optim.Adam(self.q_network_1.parameters(), lr=q_lr)
         self.q_2_opt = torch.optim.Adam(self.q_network_2.parameters(), lr=q_lr)
 
@@ -46,7 +42,7 @@ class SACAgent_v1:
         self.target_q_network_2 = deepcopy(self.q_network_2)
 
         self.policy_network = PolicyNetwork(observation_space_shape, goal_space_shape,
-                                            action_space_shape, action_ranges, include_conv=include_conv).to(self.device)
+                                            action_space_shape, action_ranges).to(self.device)
         self.policy_opt = torch.optim.Adam(self.policy_network.parameters(), lr=policy_lr)
 
         # alpha part
@@ -83,7 +79,7 @@ class SACAgent_v1:
 
     def train(self, batch, update_alpha=True):
         obs, goals, actions, rewards, next_obs, next_goals, dones = batch
-        # normalize actions
+        # normalize weights
         action_scale = self.policy_network.action_scale
         action_bias = self.policy_network.action_bias
         actions = (actions - action_bias) / action_scale
@@ -111,16 +107,18 @@ class SACAgent_v1:
         q_1 = self.q_network_1(obs, goals, policy_actions)
         q_2 = self.q_network_2(obs, goals, policy_actions)
         q = torch.min(q_1, q_2)
+        # Try to minimize action components mean to reach the goal with min possible control
         policy_loss = torch.mean((self.alpha * log_probs) - q) + torch.mean((policy_actions / action_scale).pow(2))
 
+        # backpropagation
         q_1_loss.backward()
-        self.q_1_opt.step()
-
         q_2_loss.backward()
-        self.q_2_opt.step()
-
         policy_loss.backward()
+
+        # gradient step
         self.policy_opt.step()
+        self.q_1_opt.step()
+        self.q_2_opt.step()
 
         # zero gradients of optimizers
         self.policy_opt.zero_grad()
@@ -135,7 +133,7 @@ class SACAgent_v1:
             self.alpha_optim.step()
             self.alpha_optim.zero_grad()
 
-            self.alpha = torch.clamp(self.log_alpha.exp(), min=2e-2, max=2)
+            self.alpha = torch.clamp(self.log_alpha.exp(), min=1e-2, max=2)
 
         self._soft_update(self.target_q_network_1, self.q_network_1, self.tau)
         self._soft_update(self.target_q_network_2, self.q_network_2, self.tau)
@@ -177,7 +175,8 @@ class SACAgent_v1:
             raise IOError(f"No ./weights/{model_name} folder to load pretrained model")
 
         self.load_normalizer_parameters(model_name)
-        self.policy_network.load_state_dict(torch.load(f"./weights/{model_name}/policy_network.pt"))
+        self.policy_network.load_state_dict(torch.load(f"./weights/{model_name}/policy_network.pt",
+                                                       map_location=lambda storage, loc: storage))
 
         if evaluate:
             return
