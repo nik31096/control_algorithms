@@ -6,14 +6,9 @@
 	</option>
 	
 	<default>
-		<joint damping="0" stiffness="0" armature=".1" user="0"/>
+		<joint damping="3" stiffness="0" armature="0" user="0"/>
 		<geom solref="0.008 1" solimp="0.95 0.95 0.01" margin="0.001" user="0"/>
-		<position ctrllimited="true"/>
-		
-		<default class='0'>
-			<geom friction="1 0.005 0.001" rgba=".75 .6 .5 1" contype="1" conaffinity="0"/>
-		</default>
-		
+		<!-- <position ctrllimited="true"/> -->
 	</default>
 	
 	<worldbody>
@@ -26,16 +21,16 @@
 		<!-- <site name="camera_holder" type="capsule" size="0.02" fromto="0 0 0 0 0 6" rgba="0 1 0 0.1"/> -->
 		<camera name="upper_camera" pos="0 0 6" />
 		<body pos="0 0 0">
-			<inertial diaginertia="0.2725 0.2725 0.2725" mass="3" pos="0 0 0"></inertial>
-			<joint name="joint_1" type="hinge" axis="0 0 1" pos="0 0 0" /> <!-- limited="true" range="-3 3"/> -->
+			<inertial diaginertia="0.3607 0.3607 0.3607" mass="3" pos="0 0 0"></inertial>
+			<joint name="joint_1" type="hinge" axis="0 0 1" pos="0 0 0" limited="true" range="-5 5"/>
 			<geom name="shoulder" type="capsule" size="0.03" fromto="0 0 0.16 0 1.2 0.16" rgba="0.91 0.18 0.78 1"/>
 			<site name="connection_site_1" type="cylinder" size="0.05 0.1" pos="0 0 0.1" rgba="0.11 0.38 0.95 0.9"/>
 			
 			<body pos="0 0 0.08">
-				<inertial diaginertia="0.2725 0.2725 0.2725" mass="3" pos="0 0 0"></inertial>
+				<inertial diaginertia="0.2507 0.2507 0.2507" mass="3" pos="0 0 0"></inertial>
 				<geom name="elbow" type="capsule" size="0.03" fromto="0 1.2 0 0 2.2 0" rgba="0.91 0.18 0.78 1"/>
 				<site name="connection_site_2" type="cylinder" size="0.05 0.08" pos="0 1.2 0.05" rgba="0.11 0.38 0.95 0.9"/>
-				<joint name="joint_2" type="hinge" axis="0 0 1" pos="0 1.2 0" /> <!-- limited="true" range="-3 3"/> -->
+				<joint name="joint_2" type="hinge" axis="0 0 1" pos="0 1.2 0" limited="true" range="-5 5"/>
 				<site name="end_site" type="sphere" size="0.03" pos="0 2.22 0" rgba="0 1 0 1"/>
 			</body>
 		</body>

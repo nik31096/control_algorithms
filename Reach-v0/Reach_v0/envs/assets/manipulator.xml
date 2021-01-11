@@ -6,7 +6,7 @@
 	</option>
 	
 	<default>
-		<joint limited="true" damping="0" stiffness="0" armature=".1" user="0"/>
+		<joint limited="true" damping="3" stiffness="0" armature=".1" user="0"/>
 		<geom solref="0.008 1" solimp="0.95 0.95 0.01" margin="0.001" user="0"/>
 		<position ctrllimited="true"/>
 		

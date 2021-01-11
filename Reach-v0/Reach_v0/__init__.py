@@ -21,5 +21,11 @@ register(
 register(
     id='Reach-v3',
     entry_point='Reach_v0.envs:ReachEnv_v3',
+    max_episode_steps=2000,
+)
+
+register(
+    id='Reach-v4',
+    entry_point='Reach_v0.envs:ReachEnv_v4',
     max_episode_steps=100,
 )
