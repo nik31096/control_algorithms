@@ -148,11 +148,14 @@ class iLQR:
 
         return controls
 
-    def get_control(self, x, t):
+    def get_control(self, x, t, explore=False):
         if self.k_gains is None:
             control = np.random.uniform(low=-1, high=1, size=self.action_dim)
         else:
             control = np.dot(-self.k_gains[t], np.block([x - self.final_state, 1]))[:-1]
+
+        if explore:
+            control += 5e-2*control*np.random.uniform(0, 1)
 
         self.controller_actions.append(control)
 
@@ -194,7 +197,7 @@ class iLQR:
     @staticmethod
     def cost(x, u, x_i, u_i, x_target):
         alpha = 0.97
-        pure_cost = 0.5 * autonp.sum(u ** 2) + autonp.sum((x - x_target) ** 2)
+        pure_cost = 0.5 * autonp.sum(u ** 2)
         cost_correction = autonp.sum((x - x_i) ** 2) + autonp.sum((u - u_i) ** 2)
         c = alpha * cost_correction + (1 - alpha) * pure_cost
 

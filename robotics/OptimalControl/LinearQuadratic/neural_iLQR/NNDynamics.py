@@ -79,8 +79,8 @@ class LinearDynamics:
         self.buf.put(states, actions, next_states)
 
     def dyn(self, state, action):
-        state = torch.FloatTensor(state)
-        action = torch.FloatTensor(action)
+        state = torch.FloatTensor(state).to(self.device)
+        action = torch.FloatTensor(action).to(self.device)
         next_state = self.net(state, action)
 
         return next_state.cpu().data.numpy()
@@ -157,8 +157,8 @@ class NonLinearDynamics(LinearDynamics):
 
         def get_derivative(state, action):
             assert arg in [0, 1], "Dynamics function can have only two arguments: state and action."
-            state = torch.FloatTensor(state)
-            action = torch.FloatTensor(action)
+            state = torch.FloatTensor(state).to(self.device)
+            action = torch.FloatTensor(action).to(self.device)
             base = self.net(state, action)
             if arg == 0:
                 if method == 'nn':
@@ -176,7 +176,7 @@ class NonLinearDynamics(LinearDynamics):
                 elif method == 'forward':
                     d = []
                     for i in range(self.state_dim):
-                        o = torch.zeros((self.state_dim,))
+                        o = torch.zeros((self.state_dim,)).to(self.device)
                         o[i] = 1
                         perturbed_state = state + h*o
                         j = (self.net(perturbed_state, action) - base) / h
@@ -187,7 +187,7 @@ class NonLinearDynamics(LinearDynamics):
                 elif method == 'backward':
                     d = []
                     for i in range(self.state_dim):
-                        o = torch.zeros((self.state_dim,))
+                        o = torch.zeros((self.state_dim,)).to(self.device)
                         o[i] = 1
                         perturbed_state = state - h * o
                         j = (base - self.net(perturbed_state, action)) / h
@@ -198,7 +198,7 @@ class NonLinearDynamics(LinearDynamics):
                 elif method == 'center':
                     d = []
                     for i in range(self.state_dim):
-                        o = torch.zeros((self.state_dim,))
+                        o = torch.zeros((self.state_dim,)).to(self.device)
                         o[i] = 1
                         forward_state = state + h * o / 2
                         backward_state = state - h * o / 2
@@ -222,7 +222,7 @@ class NonLinearDynamics(LinearDynamics):
                 elif method == 'forward':
                     d = []
                     for i in range(self.action_dim):
-                        o = torch.zeros((self.action_dim,))
+                        o = torch.zeros((self.action_dim,)).to(self.device)
                         o[i] = 1
                         perturbed_action = action + h * o
                         j = (self.net(state, perturbed_action) - base) / h
@@ -233,7 +233,7 @@ class NonLinearDynamics(LinearDynamics):
                 elif method == 'backward':
                     d = []
                     for i in range(self.action_dim):
-                        o = torch.zeros((self.action_dim,))
+                        o = torch.zeros((self.action_dim,)).to(self.device)
                         o[i] = 1
                         perturbed_action = action - h * o
                         j = (base - self.net(state, perturbed_action)) / h
@@ -244,7 +244,7 @@ class NonLinearDynamics(LinearDynamics):
                 elif method == 'center':
                     d = []
                     for i in range(self.action_dim):
-                        o = torch.zeros((self.action_dim,))
+                        o = torch.zeros((self.action_dim,)).to(self.device)
                         o[i] = 1
                         forward_action = action + h * o / 2
                         backward_action = action - h * o / 2
