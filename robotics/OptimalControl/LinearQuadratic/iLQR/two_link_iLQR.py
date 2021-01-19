@@ -7,11 +7,11 @@ import Reach_v0
 from robotics.OptimalControl.LinearQuadratic.iLQR.iLQR import iLQR
 
 from tqdm import trange
+import pickle as pkl
 
 env = gym.make('Reach-v3')
+env.set_goal(-1.0208531827170118, 0.46790526344549)
 state = env.reset()
-
-epochs = 20
 
 dyn = env.get_next_state
 final_state = env.inverse_kinematics(x=state['desired_goal'][0], y=state['desired_goal'][1])
@@ -30,9 +30,12 @@ for t in trange(2000):
     controls.append(control)
     state = next_state
 
-    if t % 30 == 0:
-        optimal_controls = ilqr.fit_controller(controls=optimal_controls, epochs=8,
+    if t % 50 == 0:
+        optimal_controls = ilqr.fit_controller(controls=optimal_controls, epochs=3,
                                                initial_state=state['observation'], verbose=0)
+
+with open('ilqr_controls', "wb") as f:
+    pkl.dump(controls, f)
 
 ilqr.save_controller('reach_known_dyn_mpc')
 

@@ -5,12 +5,12 @@ from autograd import jacobian
 import numpy as np
 import matplotlib.pyplot as plt
 
-from robotics.OptimalControl.LinearQuadratic.neural_iLQR.NNDynamics import Dynamics
+from robotics.OptimalControl.LinearQuadratic.neural_iLQR.NNDynamics import NonLinearDynamics
 
 env = gym.make('Reach-v3')
 state = env.reset()['observation']
 
-nn_dyn = Dynamics(state_dim=4, action_dim=2, device='cpu')
+nn_dyn = NonLinearDynamics(state_dim=4, action_dim=2, device='cpu')
 nn_dyn.load('./dynamics.pt')
 dyn = env.get_next_state
 arg = 0
@@ -40,6 +40,7 @@ for t in range(env._max_episode_steps):
     pred_states.append(next_pred_state)
     state = next_state['observation']
 
+plt.figure(figsize=(20, 10))
 plt.plot(nn_acc, label='PyTorch jacobian method', linewidth=0.4)
 plt.plot(forward_acc, label='Forward FD', linewidth=0.4)
 plt.plot(backward_acc, label='Backward FD', linewidth=0.4)
@@ -49,20 +50,24 @@ plt.show()
 
 plt.figure(figsize=(20, 10))
 plt.subplot(221)
-plt.plot([x[0] for x in pred_states])
-plt.plot([x[0] for x in real_states])
-plt.title('First state component')
+plt.plot([x[0] for x in real_states], label='real')
+plt.plot([x[0] for x in pred_states], label='predicted')
+plt.title("First joint angle")
+plt.legend()
 plt.subplot(222)
-plt.plot([x[1] for x in pred_states])
-plt.plot([x[1] for x in real_states])
-plt.title('Second state component')
+plt.plot([x[1] for x in real_states], label='real')
+plt.plot([x[1] for x in pred_states], label='predicted')
+plt.title("First joint angular velocity")
+plt.legend()
 plt.subplot(223)
-plt.plot([x[2] for x in pred_states])
-plt.plot([x[2] for x in real_states])
-plt.title('Third state component')
+plt.plot([x[2] for x in real_states], label='real')
+plt.plot([x[2] for x in pred_states], label='predicted')
+plt.title("Second joint angle")
+plt.legend()
 plt.subplot(224)
-plt.plot([x[3] for x in pred_states])
-plt.plot([x[3] for x in real_states])
-plt.title('Forth state component')
+plt.plot([x[3] for x in real_states], label='real')
+plt.plot([x[3] for x in pred_states], label='predicted')
+plt.title("Second joint angular velocity")
+plt.legend()
 plt.show()
 
