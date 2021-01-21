@@ -56,8 +56,8 @@ class iLQR:
             self.initial_state = initial_state
 
         self.Q_f = np.diag(np.array(np.block([1e5*np.ones((self.state_dim,)), 1])))
-        self.k_gains = kwargs.get('k_gains', None)
-        self.controller_actions = kwargs.get('controls', [])
+        self.k_gains = kwargs.get('k_gains', [])
+        self.controller_k_gains = self.k_gains
 
     def set_final_state(self, final_state, inv_kin):
         final_state = inv_kin(final_state[0], final_state[1])
@@ -148,28 +148,24 @@ class iLQR:
 
         return controls
 
-    def get_control(self, x, t, explore=False):
-        if self.k_gains is None:
-            control = np.random.uniform(low=-1, high=1, size=self.action_dim)
+    def get_control(self, x, t, evaluate=False):
+        if evaluate:
+            control = np.dot(-self.controller_k_gains[t], np.block([x - self.final_state, 1]))[:-1]
         else:
-            control = np.dot(-self.k_gains[t], np.block([x - self.final_state, 1]))[:-1]
-
-        if explore:
-            control += 5e-2*control*np.random.uniform(0, 1)
-
-        self.controller_actions.append(control)
+            k = self.k_gains[t]
+            control = np.dot(-k, np.block([x - self.final_state, 1]))[:-1]
+            self.controller_k_gains.append(k)
 
         return control
 
     def save_controller(self, filename):
         controller_params = {
-            'k_gains': self.k_gains,
+            'k_gains': self.controller_k_gains,
             'final_state': self.final_state,
             'dyn': self.f,
             'T': self.T,
             'state_dim': self.state_dim,
-            'action_dim': self.action_dim,
-            'controls': self.controller_actions
+            'action_dim': self.action_dim
         }
 
         if not os.path.exists('./saved_controllers'):
