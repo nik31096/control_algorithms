@@ -20,10 +20,10 @@ def make_env(env_id):
 
 
 env_id = "Reach-v3"
-n_envs = 32
+n_envs = 16
 
 envs = [make_env(env_id) for _ in range(n_envs)]
-envs = SubprocVecEnv(envs, context='fork', in_series=8)
+envs = SubprocVecEnv(envs, context='fork', in_series=4)
 states = envs.reset()
 
 env = gym.make(env_id)
@@ -36,7 +36,7 @@ dynamics = NonLinearDynamics(state_dim=envs.observation_space['observation'].sha
                              device='cuda:0')
 
 print("[INFO] Model learning")
-for epoch in trange(100):
+for epoch in trange(50):
     # data collection stage
     episode_states = []
     episode_actions = []
@@ -56,7 +56,7 @@ for epoch in trange(100):
             dynamics.add_trajectory(states=episode_states, actions=episode_actions, next_states=episode_next_states)
             break
 
-    if epoch % 5 == 0:
+    if epoch % 2 == 0:
         dynamics.train_dynamics(epochs=100, batch_size=512)
 
 
@@ -71,27 +71,28 @@ optimal_controls = ilqr.fit_controller(epochs=20, verbose=1)
 
 print("[INFO] iLQR MPC starts")
 final_states = []
-mpc_timesteps = 1
 controls, states, next_states = [], [], []
-for t in range(max_steps):
-    u = ilqr.get_control(state['observation'], t % mpc_timesteps)
+for t in trange(1000):
+    u = ilqr.get_control(state['observation'], 0)
     next_state, reward, done, _ = env.step(u)
     states.append(state['observation'])
     controls.append(u)
     next_states.append(next_state['observation'])
 
-    if t % mpc_timesteps == 0 and t != 0:
+    if t > 0:
         optimal_controls = ilqr.fit_controller(controls=optimal_controls, epochs=8,
                                                initial_state=next_state['observation'])
 
     state = next_state
 
+ilqr.save_controller('one_step_mpc')
+
 
 state = env.reset()
 states = [state['observation']]
 actions = []
-for t in range(max_steps):
-    u = ilqr.get_control(state['observation'], t)
+for t in range(1000):
+    u = ilqr.get_control(state['observation'], t, evaluate=True)
     next_state, reward, done, _ = env.step(u)
     state = next_state
     states.append(state['observation'])
