@@ -36,11 +36,11 @@ def main(device):
 
         return _f
 
-    env_id = "Reach-v4"
-    n_envs = 48
+    env_id = "Reach-v0"
+    n_envs = 4
 
     envs = [make_env(env_id) for _ in range(n_envs)]
-    envs = SubprocVecEnv(envs, context='fork', in_series=6)
+    envs = SubprocVecEnv(envs, context='fork', in_series=2)
     states = envs.reset()
 
     test_env = gym.make(env_id)
@@ -49,12 +49,6 @@ def main(device):
                   'goals': test_env.observation_space['achieved_goal'].shape[0],
                   'reward_function': test_env.compute_reward,
                   'max_episode_timesteps': test_env._max_episode_steps}
-
-    replay_buffer = HindsightExperienceReplay(env_params=env_params,
-                                              size=int(1e7 / n_envs),
-                                              n_envs=n_envs,
-                                              use_achieved_goal=True,
-                                              k=8)
 
     agent = SACAgent(hidden_dim=hidden_dim,
                      goal_space_shape=envs.observation_space["achieved_goal"].shape[0],
@@ -69,6 +63,13 @@ def main(device):
                      device=device
                      )
 
+    replay_buffer = HindsightExperienceReplay(env_params=env_params,
+                                              size=int(1e7 / n_envs),
+                                              n_envs=n_envs,
+                                              use_achieved_goal=True,
+                                              k=8,
+                                              curl_encoder=agent.curl.encoder)
+
     pretrained = False
     if pretrained:
         agent.load_pretrained_models('reach_1')
@@ -81,11 +82,8 @@ def main(device):
                 actions = np.array([envs.action_space.sample() for _ in range(n_envs)])
             else:
                 actions = agent.select_action(states)
-            next_states, rewards, dones, info = envs.step(actions)
 
-            # apply CURL processing to states
-            states = agent.curl(states)
-            next_states = agent.curl(next_states)
+            next_states, rewards, dones, info = envs.step(actions)
 
             replay_buffer.collect_episodes(states, actions, rewards, next_states, dones)
             # Training

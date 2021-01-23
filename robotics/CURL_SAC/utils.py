@@ -281,21 +281,21 @@ class ExperienceReplay:
 
 
 class HindsightExperienceReplay:
-    def __init__(self, env_params, n_envs, k=8, size=20000, use_achieved_goal=False, device='cuda'):
+    def __init__(self, env_params, n_envs, curl_encoder, k=8, size=20000, use_achieved_goal=False, device='cuda'):
         self.env_params = env_params
         self.size = size
         self.data = {"obs": np.empty([size, env_params["max_episode_timesteps"], env_params['obs']]),
-                     "weights": np.empty([size, env_params["max_episode_timesteps"], env_params['weights']]),
+                     "actions": np.empty([size, env_params["max_episode_timesteps"], env_params['actions']]),
                      "goals": np.empty([size, env_params["max_episode_timesteps"], env_params['goals']]),
                      "ach_goals": np.empty([size, env_params["max_episode_timesteps"], env_params['goals']]),
                      "next_obs": np.empty([size, env_params["max_episode_timesteps"], env_params['obs']]),
                      "next_ach_goals": np.empty([size, env_params["max_episode_timesteps"], env_params['goals']]),
                      "rewards": np.empty([size, env_params["max_episode_timesteps"], 1]),
-                     "dones": np.empty([size, env_params["max_episode_timesteps"], 1])
-                     }
+                     "dones": np.empty([size, env_params["max_episode_timesteps"], 1])}
         self._next = 0
         self.n_envs = n_envs
         self.k = k
+        self.encoder = curl_encoder
         self.reward_function = env_params['reward_function']
         self.device = device
         self.current_size = 0
@@ -305,7 +305,7 @@ class HindsightExperienceReplay:
 
     def _get_episode_data(self):
         return {"obs": [[] for _ in range(self.n_envs)],
-                "weights": [[] for _ in range(self.n_envs)],
+                "actions": [[] for _ in range(self.n_envs)],
                 "goals": [[] for _ in range(self.n_envs)],
                 "ach_goals": [[] for _ in range(self.n_envs)],
                 "next_obs": [[] for _ in range(self.n_envs)],
@@ -315,17 +315,17 @@ class HindsightExperienceReplay:
                 }
 
     def collect_episodes(self, states, actions, rewards, next_states, dones):
-        obs = states["observation"]
+        obs = self.encoder(states["observation"])
         goals = states["desired_goal"]
         ach_goals = states["achieved_goal"]
-        next_obs = next_states["observation"]
+        next_obs = self.encoder(next_states["observation"])
         next_ach_goals = next_states["achieved_goal"]
 
         for n in range(self.n_envs):
             self.episode_data["obs"][n].append(obs[n])
             self.episode_data["goals"][n].append(goals[n])
             self.episode_data["ach_goals"][n].append(ach_goals[n])
-            self.episode_data["weights"][n].append(actions[n])
+            self.episode_data["actions"][n].append(actions[n])
             self.episode_data["rewards"][n].append([rewards[n]])
             self.episode_data["next_obs"][n].append(next_obs[n])
             self.episode_data["next_ach_goals"][n].append(next_ach_goals[n])
@@ -335,7 +335,7 @@ class HindsightExperienceReplay:
         obs = np.array(self.episode_data['obs'])
         goals = np.array(self.episode_data['goals'])
         ach_goals = np.array(self.episode_data['ach_goals'])
-        actions = np.array(self.episode_data['weights'])
+        actions = np.array(self.episode_data['actions'])
         rewards = np.array(self.episode_data['rewards'])
         next_obs = np.array(self.episode_data['next_obs'])
         next_ach_goals = np.array(self.episode_data['next_ach_goals'])
@@ -345,7 +345,7 @@ class HindsightExperienceReplay:
         self.data['obs'][idx] = obs
         self.data['goals'][idx] = goals
         self.data['ach_goals'][idx] = ach_goals
-        self.data['weights'][idx] = actions
+        self.data['actions'][idx] = actions
         self.data['rewards'][idx] = rewards
         self.data['next_obs'][idx] = next_obs
         self.data['next_ach_goals'][idx] = next_ach_goals
@@ -419,7 +419,7 @@ class HindsightExperienceReplay:
         obs = torch.FloatTensor(transitions['obs']).to(self.device)
         goals = transitions['goals'] - transitions['ach_goals'] if self.use_achieved_goal else transitions['goals']
         goals = torch.FloatTensor(goals).to(self.device)
-        actions = torch.FloatTensor(transitions['weights']).to(self.device)
+        actions = torch.FloatTensor(transitions['actions']).to(self.device)
         rewards = torch.FloatTensor(transitions['rewards']).to(self.device)
         next_obs = torch.FloatTensor(transitions['next_obs']).to(self.device)
         next_goals = transitions['goals'] - transitions['next_ach_goals'] if self.use_achieved_goal \

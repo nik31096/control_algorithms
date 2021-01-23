@@ -87,6 +87,12 @@ class CURL:
 
         return crop
 
+    def save(self, filename):
+        torch.save(self.encoder.state_dict(), filename)
+
+    def load(self, filename):
+        self.encoder.load_state_dict(torch.load(filename, map_location=lambda storage, loc: storage))
+
 
 if __name__ == '__main__':
     import dmc2gym

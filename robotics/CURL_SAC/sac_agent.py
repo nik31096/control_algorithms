@@ -165,6 +165,8 @@ class SACAgent:
         if not os.path.exists(f'./weights/{model_name}'):
             os.mkdir(f'./weights/{model_name}')
 
+        self.curl.save(f'./weights/{model_name}/curl_encoder.pt')
+
         self.obs_norm.save(f'./weights/{model_name}', 'obs')
         self.goal_norm.save(f'./weights/{model_name}', 'goal')
 
@@ -184,6 +186,7 @@ class SACAgent:
         if not os.path.exists(f'./weights/{model_name}'):
             raise IOError(f"No ./weights/{model_name} folder to load pretrained model")
 
+        self.curl.load(f"./weights/{model_name}/curl_encoder.pt")
         self.load_normalizer_parameters(model_name)
         self.policy_network.load_state_dict(torch.load(f"./weights/{model_name}/policy_network.pt",
                                                        map_location=lambda storage, loc: storage))
