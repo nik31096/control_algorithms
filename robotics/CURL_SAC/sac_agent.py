@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from robotics.CURL_SAC.utils import QNetwork, PolicyNetwork, Normalizer
-from robotics.CURL_SAC.contrastive_encoder import CURL
+from robotics.CURL_SAC.curl import CURL
 
 import os
 from copy import deepcopy
@@ -10,7 +10,6 @@ from copy import deepcopy
 
 class SACAgent:
     def __init__(self,
-                 observation_space_shape,
                  goal_space_shape,
                  action_space_shape,
                  action_ranges,
@@ -22,8 +21,7 @@ class SACAgent:
                  alpha_lr,
                  policy_lr,
                  device='cuda',
-                 mode='multi_env'
-                 ):
+                 mode='multi_env'):
         self.gamma = gamma
         self.tau = tau
         self.mode = mode
@@ -32,22 +30,22 @@ class SACAgent:
         # TODO: maybe add unique seeds for each environment acting
         self.seeds = [0, 1996]
 
-        self.obs_norm = Normalizer(observation_space_shape, multi_env=True if mode == 'multi_env' else False)
+        self.obs_norm = Normalizer(hidden_dim, multi_env=True if mode == 'multi_env' else False)
         self.goal_norm = Normalizer(goal_space_shape, multi_env=True if mode == 'multi_env' else False)
 
-        self.q_network_1 = QNetwork(observation_space_shape, goal_space_shape, action_space_shape).to(self.device)
-        self.q_network_2 = QNetwork(observation_space_shape, goal_space_shape, action_space_shape).to(self.device)
+        self.q_network_1 = QNetwork(hidden_dim, goal_space_shape, action_space_shape).to(self.device)
+        self.q_network_2 = QNetwork(hidden_dim, goal_space_shape, action_space_shape).to(self.device)
         self.q_1_opt = torch.optim.Adam(self.q_network_1.parameters(), lr=q_lr)
         self.q_2_opt = torch.optim.Adam(self.q_network_2.parameters(), lr=q_lr)
 
         self.target_q_network_1 = deepcopy(self.q_network_1)
         self.target_q_network_2 = deepcopy(self.q_network_2)
 
-        self.policy_network = PolicyNetwork(observation_space_shape, goal_space_shape,
+        self.policy_network = PolicyNetwork(hidden_dim, goal_space_shape,
                                             action_space_shape, action_ranges).to(self.device)
         self.policy_opt = torch.optim.Adam(self.policy_network.parameters(), lr=policy_lr)
 
-        self.curl = CURL(hidden_dim=hidden_dim, )
+        self.curl = CURL(hidden_dim=hidden_dim, device=self.device)
 
         # alpha part
         self.alpha = alpha
@@ -71,6 +69,8 @@ class SACAgent:
         observations = torch.FloatTensor(self.obs_norm.normalize(observations)).to(self.device)
         goals = torch.FloatTensor(self.goal_norm.normalize(goals)).to(self.device)
 
+        observations = self.curl(observations)
+
         if evaluate:
             actions = self.policy_network.sample(observations, goals, evaluate=True)
         else:
@@ -83,6 +83,9 @@ class SACAgent:
 
     def train(self, batch, update_alpha=True):
         obs, goals, actions, rewards, next_obs, next_goals, dones = batch
+
+        self.curl.train(obs)
+
         # normalize weights
         action_scale = self.policy_network.action_scale
         action_bias = self.policy_network.action_bias
@@ -92,6 +95,9 @@ class SACAgent:
         goals = self.goal_norm.normalize(goals, device=self.device)
         next_obs = self.obs_norm.normalize(next_obs, device=self.device)
         next_goals = self.goal_norm.normalize(next_goals, device=self.device)
+
+        obs = self.curl(obs)
+        next_obs = self.curl(next_obs)
 
         with torch.no_grad():
             next_actions, next_log_probs = self.policy_network.sample(next_obs, next_goals)
