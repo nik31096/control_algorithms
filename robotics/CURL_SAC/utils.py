@@ -153,22 +153,32 @@ class Encoder(nn.Module):
             BasicBlock(128, 128),
             BasicBlock(128, 128)
         )
+        self.layer3 = nn.Sequential(
+            BasicBlock(64, 128, downsample=True),
+            BasicBlock(128, 128),
+            BasicBlock(128, 128)
+        )
+        self.layer4 = nn.Sequential(
+            BasicBlock(128, 256, downsample=True),
+            BasicBlock(256, 256),
+            BasicBlock(256, 256)
+        )
         self.flatten = nn.Flatten()
-        self.dense1 = nn.Linear(8 * 8 * 128, 512)
-        self.dropout = nn.Dropout(p=0.1)
-        self.dense2 = nn.Linear(512, hidden_dim)
+        self.dense = nn.Linear(6 * 6 * 256, hidden_dim)
 
     def forward(self, x):
+        if not isinstance(x, torch.Tensor):
+            x = torch.FloatTensor(x).to(self.conv1.weight.device)
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.maxpool1(out)
 
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
+        out = self.layer4(out)
         out = self.flatten(out)
-        out = F.relu(self.dense1(out))
-        out = self.dropout(out)
-        out = self.dense2(out)
+        out = F.leaky_relu(self.dense(out))
+        # out = self.dropout(out)
 
         return out
 
@@ -315,10 +325,10 @@ class HindsightExperienceReplay:
                 }
 
     def collect_episodes(self, states, actions, rewards, next_states, dones):
-        obs = self.encoder(states["observation"])
+        obs = self.encoder(states["observation"]).cpu().data.numpy()
         goals = states["desired_goal"]
         ach_goals = states["achieved_goal"]
-        next_obs = self.encoder(next_states["observation"])
+        next_obs = self.encoder(next_states["observation"]).cpu().data.numpy()
         next_ach_goals = next_states["achieved_goal"]
 
         for n in range(self.n_envs):

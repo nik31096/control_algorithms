@@ -12,8 +12,8 @@ from robotics.CURL_SAC.sac_agent import SACAgent
 from robotics.CURL_SAC.utils import HindsightExperienceReplay
 from multiprocessing_environment.subproc_env import SubprocVecEnv
 
-from mujoco_py import GlfwContext
-GlfwContext(offscreen=True)
+# from mujoco_py import GlfwContext
+# GlfwContext(offscreen=True)
 
 
 def main(device):
@@ -37,18 +37,19 @@ def main(device):
         return _f
 
     env_id = "Reach-v0"
-    n_envs = 4
+    n_envs = 16
 
     envs = [make_env(env_id) for _ in range(n_envs)]
     envs = SubprocVecEnv(envs, context='fork', in_series=2)
     states = envs.reset()
 
     test_env = gym.make(env_id)
-    env_params = {'obs': test_env.observation_space['observation'].shape[0],
-                  'weights': test_env.action_space.shape[0],
+    max_steps = test_env._max_episode_steps
+    env_params = {'obs': hidden_dim,
+                  'actions': test_env.action_space.shape[0],
                   'goals': test_env.observation_space['achieved_goal'].shape[0],
                   'reward_function': test_env.compute_reward,
-                  'max_episode_timesteps': test_env._max_episode_steps}
+                  'max_episode_timesteps': max_steps}
 
     agent = SACAgent(hidden_dim=hidden_dim,
                      goal_space_shape=envs.observation_space["achieved_goal"].shape[0],
@@ -93,14 +94,14 @@ def main(device):
                 # entropy_loss, alpha
                 q_1_loss, q_2_loss, policy_loss, mean_q, entropy_loss, alpha = agent.train(batch, update_alpha=True)
 
-                writer.add_scalar("Q1_loss", q_1_loss, epoch*test_env._max_episode_steps + step)
-                writer.add_scalar("Q2_loss", q_2_loss, epoch*test_env._max_episode_steps + step)
-                writer.add_scalar("Policy_loss", policy_loss, epoch*test_env._max_episode_steps + step)
-                writer.add_scalar("Mean_Q", mean_q, epoch*test_env._max_episode_steps + step)
+                writer.add_scalar("Q1_loss", q_1_loss, epoch * max_steps + step)
+                writer.add_scalar("Q2_loss", q_2_loss, epoch * max_steps + step)
+                writer.add_scalar("Policy_loss", policy_loss, epoch * max_steps + step)
+                writer.add_scalar("Mean_Q", mean_q, epoch * max_steps + step)
                 writer.add_scalar("Entropy loss", entropy_loss, epoch)
                 writer.add_scalar("Alpha", alpha, epoch)
                 writer.add_scalar("Success_rate", round(sum([_info['is_success'] for _info in info]) / n_envs, 2),
-                                  epoch*test_env._max_episode_steps + step)
+                                  epoch * max_steps + step)
 
             states = next_states
             if np.all(dones):
