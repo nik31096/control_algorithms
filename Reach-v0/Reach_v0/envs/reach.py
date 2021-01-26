@@ -12,8 +12,11 @@ from gym.envs.robotics import utils
 import mujoco_py
 import glfw
 
+from mujoco_py import GlfwContext
+GlfwContext(offscreen=True)
 
-DEFAULT_SIZE = 500
+
+DEFAULT_SIZE = 84
 
 
 class Reach2DEnv(gym.GoalEnv):
@@ -25,8 +28,8 @@ class Reach2DEnv(gym.GoalEnv):
                  initial_qpos,
                  mode='model-free',
                  state_form='image',
-                 width=256,
-                 height=256,
+                 width=84,
+                 height=84,
                  dynamical_goal=True,
                  limited_goal_area=True,
                  has_obstacle=False
@@ -211,8 +214,11 @@ class Reach2DEnv(gym.GoalEnv):
     def _get_obs(self):
         end_pos = self.sim.data.get_site_xpos('end_site')
         if self.state_form == 'image':
-            camera_image = self.render(mode='rgb_array')
-            camera_image = np.transpose(camera_image, [2, 0, 1]) / 255
+            # camera_image = self.render(mode='rgb_array')
+            camera_image = self.sim.render(width=self.width, height=self.height, mode='offscreen',
+                                           camera_name='upper_camera', depth=False)
+            camera_image = np.transpose(camera_image[::-1, :, :], [2, 0, 1]) / 255
+            # camera_image = np.transpose(camera_image, [2, 0, 1]) / 255
 
             return camera_image, end_pos
 
@@ -328,8 +334,8 @@ class ReachEnv_v0(Reach2DEnv, EzPickle):
     def __init__(self):
         model_path = 'manipulator_without_joint_limits.xml'
         n_actions = 2
-        n_substeps = 30
-        distance_threshold = 0.03
+        n_substeps = 20
+        distance_threshold = 0.08
 
         Reach2DEnv.__init__(self,
                             model_path=model_path,
@@ -384,7 +390,7 @@ class ReachEnv_v2(Reach2DEnv, EzPickle):
                             initial_qpos={'joint_1': 0, 'joint_2': 0},
                             state_form='angles',
                             limited_goal_area=False,
-                            dynamical_goal=True
+                            dynamical_goal=False # TODO: change to True
                             )
         EzPickle.__init__(self)
 
