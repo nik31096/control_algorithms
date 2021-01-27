@@ -99,90 +99,6 @@ class QNetwork(nn.Module):
         return out
 
 
-class BasicBlock(nn.Module):
-    def __init__(self, in_maps, out_maps, downsample=False):
-        super(BasicBlock, self).__init__()
-        self.in_maps = in_maps
-        self.out_maps = out_maps
-        self.conv1 = nn.Conv2d(in_maps, out_maps, (3, 3), stride=1 if not downsample else 2, padding=1)
-        self.bn1 = nn.BatchNorm2d(out_maps)
-        self.conv2 = nn.Conv2d(out_maps, out_maps, (3, 3), stride=1, padding=1)
-        self.bn2 = nn.BatchNorm2d(out_maps)
-        if downsample:
-            self.downsample = nn.Sequential(
-                nn.Conv2d(in_maps, out_maps, (1, 1), stride=2),
-                nn.BatchNorm2d(out_maps)
-            )
-        else:
-            self.downsample = None
-
-    def forward(self, x):
-        identity = x
-
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = F.relu(self.bn2(self.conv2(out)))
-
-        if self.downsample is not None:
-            identity = self.downsample(identity)
-
-        out += identity
-
-        out = F.relu(out)
-
-        return out
-
-
-class Encoder(nn.Module):
-    def __init__(self, hidden_dim):
-        super(Encoder, self).__init__()
-        self.conv1 = nn.Conv2d(3, 32, (7, 7), stride=2, padding=3)
-        self.bn1 = nn.BatchNorm2d(32)
-        self.maxpool1 = nn.MaxPool2d((3, 3), stride=1, padding=1)
-
-        self.layer1 = nn.Sequential(
-            BasicBlock(32, 32),
-            BasicBlock(32, 32)
-        )
-        self.layer2 = nn.Sequential(
-            BasicBlock(32, 64, downsample=True),
-            BasicBlock(64, 64),
-            BasicBlock(64, 64)
-        )
-        self.layer3 = nn.Sequential(
-            BasicBlock(64, 128, downsample=True),
-            BasicBlock(128, 128),
-            BasicBlock(128, 128)
-        )
-        self.layer3 = nn.Sequential(
-            BasicBlock(64, 128, downsample=True),
-            BasicBlock(128, 128),
-            BasicBlock(128, 128)
-        )
-        self.layer4 = nn.Sequential(
-            BasicBlock(128, 256, downsample=True),
-            BasicBlock(256, 256),
-            BasicBlock(256, 256)
-        )
-        self.flatten = nn.Flatten()
-        self.dense = nn.Linear(6 * 6 * 256, hidden_dim)
-
-    def forward(self, x):
-        if not isinstance(x, torch.Tensor):
-            x = torch.FloatTensor(x).to(self.conv1.weight.device)
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = self.maxpool1(out)
-
-        out = self.layer1(out)
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = self.layer4(out)
-        out = self.flatten(out)
-        out = F.leaky_relu(self.dense(out))
-        # out = self.dropout(out)
-
-        return out
-
-
 item = namedtuple("experience_replay_item", ("ob", "des_goal", "ach_goal", "action",
                                              "reward", "next_ob", "next_des_goal",
                                              "next_ach_goal", "done"))
@@ -441,17 +357,15 @@ class HindsightExperienceReplay:
 
 
 class Normalizer:
-    def __init__(self, size, multi_env=True):
+    def __init__(self, size, multi_env=True, device='cuda:0'):
         self.size = size
-        self.mean = np.zeros(size, dtype='float32')
-        self.std = np.ones(size, dtype='float32')
+        self.mean = torch.zeros(size, dtype=torch.float32).to(device)
+        self.std = torch.ones(size, dtype=torch.float32).to(device)
         self.m = 0
         self.multi_env = multi_env
 
-    def normalize(self, inputs, device='cpu'):
-        mean = self.mean if device == 'cpu' else torch.FloatTensor(self.mean).to(device)
-        std = self.std if device == 'cpu' else torch.FloatTensor(self.std).to(device)
-        return (inputs - mean) / std
+    def normalize(self, inputs):
+        return (inputs - self.mean) / self.std
 
     def update_stats(self, inputs):
         # inputs.shape = [batch_size, obs_shape]
@@ -459,23 +373,23 @@ class Normalizer:
             assert len(inputs.shape) == 2
             assert inputs.shape[1] == self.size
         n = inputs.shape[0]
-        inputs_mean = np.mean(inputs, axis=0)
-        inputs_std = np.std(inputs, axis=0)
+        inputs_mean = torch.mean(inputs, dim=0)
+        inputs_std = torch.std(inputs, dim=0)
 
-        self.std = np.sqrt((self.m*self.std**2 + n*inputs_std**2) / (n + self.m) +
-                           n*self.m*((self.mean - inputs_mean)**2) / (n + self.m)**2) + 1.01e-6
+        self.std = torch.sqrt((self.m*self.std**2 + n*inputs_std**2) / (n + self.m) +
+                              n*self.m*((self.mean - inputs_mean)**2) / (n + self.m)**2) + 1.01e-6
         self.mean = (self.m*self.mean + n*inputs_mean) / (n + self.m)
 
         self.m += n
 
-        assert self.std.all() > 1e-6, print(self.std, inputs_std, inputs)
+        assert (self.std > 1e-6).all(), print(self.std, inputs_std, inputs)
 
     def save(self, path, name):
-        np.save(f'{path}/{name}_norm_mean', self.mean)
-        np.save(f'{path}/{name}_norm_std', self.std)
+        torch.save(self.mean, f'{path}/{name}_norm_mean')
+        torch.save(self.std, f'{path}/{name}_norm_std')
 
     def load(self, path, name):
-        self.mean = np.load(f'{path}/{name}_norm_mean.npy')
-        self.std = np.load(f'{path}/{name}_norm_std.npy')
+        self.mean = torch.load(f'{path}/{name}_norm_mean.npy', map_location=lambda storage, loc: storage)
+        self.std = torch.load(f'{path}/{name}_norm_std.npy', map_location=lambda storage, loc: storage)
 
 

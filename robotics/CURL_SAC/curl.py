@@ -5,7 +5,86 @@ import torch.nn.functional as F
 import numpy as np
 from copy import deepcopy
 
-from robotics.CURL_SAC.utils import Encoder
+
+class BasicBlock(nn.Module):
+    def __init__(self, in_maps, out_maps, downsample=False):
+        super(BasicBlock, self).__init__()
+        self.in_maps = in_maps
+        self.out_maps = out_maps
+        self.conv1 = nn.Conv2d(in_maps, out_maps, (3, 3), stride=1 if not downsample else 2, padding=1)
+        self.bn1 = nn.BatchNorm2d(out_maps)
+        self.conv2 = nn.Conv2d(out_maps, out_maps, (3, 3), stride=1, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_maps)
+        if downsample:
+            self.downsample = nn.Sequential(
+                nn.Conv2d(in_maps, out_maps, (1, 1), stride=2),
+                nn.BatchNorm2d(out_maps)
+            )
+        else:
+            self.downsample = None
+
+    def forward(self, x):
+        identity = x
+
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = F.relu(self.bn2(self.conv2(out)))
+
+        if self.downsample is not None:
+            identity = self.downsample(identity)
+
+        out += identity
+
+        out = F.relu(out)
+
+        return out
+
+
+class Encoder(nn.Module):
+    def __init__(self, hidden_dim):
+        super(Encoder, self).__init__()
+        self.conv1 = nn.Conv2d(3, 32, (7, 7), stride=2, padding=3)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.maxpool1 = nn.MaxPool2d((3, 3), stride=1, padding=1)
+
+        self.layer1 = nn.Sequential(
+            BasicBlock(32, 32),
+            BasicBlock(32, 32)
+        )
+        self.layer2 = nn.Sequential(
+            BasicBlock(32, 64, downsample=True),
+            BasicBlock(64, 64),
+            BasicBlock(64, 64)
+        )
+        self.layer3 = nn.Sequential(
+            BasicBlock(64, 128, downsample=True),
+            BasicBlock(128, 128),
+            BasicBlock(128, 128)
+        )
+        self.layer4 = nn.Sequential(
+            BasicBlock(128, 256, downsample=True),
+            BasicBlock(256, 256),
+            BasicBlock(256, 256)
+        )
+        self.global_avg_pool = nn.AdaptiveAvgPool2d(output_size=(4, 4))
+        self.flatten = nn.Flatten()
+        self.dense = nn.Linear(4 * 4 * 256, hidden_dim)
+
+    def forward(self, x):
+        if not isinstance(x, torch.Tensor):
+            x = torch.FloatTensor(x).to(self.conv1.weight.device)
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.maxpool1(out)
+
+        out = self.layer1(out)
+        out = self.layer2(out)
+        out = self.layer3(out)
+        out = self.layer4(out)
+        out = self.global_avg_pool(out)
+        out = self.flatten(out)
+        out = F.leaky_relu(self.dense(out))
+        # out = self.dropout(out)
+
+        return out
 
 
 class CURL:
@@ -50,28 +129,6 @@ class CURL:
             loss.backward()
             self.opt.step()
             self.opt.zero_grad()
-
-        # for i in range(len(obs)):
-        #     ob = torch.FloatTensor(obs[i])[np.newaxis, ...].to(self.device)
-        #     query = self.encoder(self.random_crop(ob))
-        #     positive = self.momentum_encoder(self.random_crop(ob))
-        #     keys = []
-        #     for _ in range(self.neg_n):
-        #         idx = i
-        #         while idx == i:  # ensure idx doesn't equal to i
-        #             idx = np.random.randint(0, len(obs))
-        #         fake_ob = torch.FloatTensor(obs[idx]).to(self.device)[np.newaxis, ...]
-        #         key = self.momentum_encoder(self.random_crop(fake_ob)).detach()
-        #         keys.append(key)
-        #
-        #     numerator = torch.exp(torch.matmul(query, torch.matmul(self.W, positive.T)))
-        #     denominator = torch.exp(torch.matmul(query, torch.matmul(self.W, positive.T)) +
-        #                             sum([torch.matmul(query, torch.matmul(self.W, k.T)) for k in keys]))
-        #
-        #     loss = torch.log(numerator / denominator)
-        #     loss.backward()
-        #     self.opt.step()
-        #     self.opt.zero_grad()
 
         self._soft_update()
 

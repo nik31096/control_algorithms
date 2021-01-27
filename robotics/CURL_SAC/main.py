@@ -2,18 +2,14 @@ import gym
 import Reach_v0
 
 import numpy as np
-import torch
 from tensorboardX import SummaryWriter
 
 from tqdm import trange
 import os
 
-from robotics.CURL_SAC.sac_agent import SACAgent
+from robotics.CURL_SAC.curl_sac_agent import SACAgent
 from robotics.CURL_SAC.utils import HindsightExperienceReplay
 from multiprocessing_environment.subproc_env import SubprocVecEnv
-
-# from mujoco_py import GlfwContext
-# GlfwContext(offscreen=True)
 
 
 def main(device):
@@ -21,7 +17,7 @@ def main(device):
     n_epochs = 50000
     gamma = 0.999
     tau = 5e-3
-    batch_size = 4
+    batch_size = 1
     hidden_dim = 10
     model_name = "reach_image_1"
     writer_name = f"./runs/{model_name}"
@@ -37,7 +33,7 @@ def main(device):
         return _f
 
     env_id = "Reach-v0"
-    n_envs = 16
+    n_envs = 4
 
     envs = [make_env(env_id) for _ in range(n_envs)]
     envs = SubprocVecEnv(envs, context='fork', in_series=2)
@@ -52,8 +48,8 @@ def main(device):
                   'max_episode_timesteps': max_steps}
 
     agent = SACAgent(hidden_dim=hidden_dim,
-                     goal_space_shape=envs.observation_space["achieved_goal"].shape[0],
-                     action_space_shape=envs.action_space.shape[0],
+                     goal_dim=envs.observation_space["achieved_goal"].shape[0],
+                     action_dim=envs.action_space.shape[0],
                      action_ranges=(envs.action_space.low[0], envs.action_space.high[0]),
                      gamma=gamma,
                      tau=tau,
@@ -75,7 +71,7 @@ def main(device):
     if pretrained:
         agent.load_pretrained_models('reach_1')
 
-    epoch_delay = 50
+    epoch_delay = 5
 
     for epoch in trange(n_epochs):
         for step in range(1000):
