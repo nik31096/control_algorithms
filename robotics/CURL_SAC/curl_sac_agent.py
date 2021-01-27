@@ -10,10 +10,10 @@ from copy import deepcopy
 
 class SACAgent:
     def __init__(self,
-                 goal_space_shape,
-                 action_space_shape,
-                 action_ranges,
                  hidden_dim,
+                 goal_dim,
+                 action_dim,
+                 action_ranges,
                  gamma,
                  tau,
                  alpha,
@@ -30,19 +30,18 @@ class SACAgent:
         # TODO: maybe add unique seeds for each environment acting
         self.seeds = [0, 1996]
 
-        self.obs_norm = Normalizer(hidden_dim, multi_env=True if mode == 'multi_env' else False)
-        self.goal_norm = Normalizer(goal_space_shape, multi_env=True if mode == 'multi_env' else False)
+        self.obs_norm = Normalizer(hidden_dim, multi_env=True if mode == 'multi_env' else False, device=device)
+        self.goal_norm = Normalizer(goal_dim, multi_env=True if mode == 'multi_env' else False, device=device)
 
-        self.q_network_1 = QNetwork(hidden_dim, goal_space_shape, action_space_shape).to(self.device)
-        self.q_network_2 = QNetwork(hidden_dim, goal_space_shape, action_space_shape).to(self.device)
+        self.q_network_1 = QNetwork(hidden_dim, goal_dim, action_dim).to(self.device)
+        self.q_network_2 = QNetwork(hidden_dim, goal_dim, action_dim).to(self.device)
         self.q_1_opt = torch.optim.Adam(self.q_network_1.parameters(), lr=q_lr)
         self.q_2_opt = torch.optim.Adam(self.q_network_2.parameters(), lr=q_lr)
 
         self.target_q_network_1 = deepcopy(self.q_network_1)
         self.target_q_network_2 = deepcopy(self.q_network_2)
 
-        self.policy_network = PolicyNetwork(hidden_dim, goal_space_shape,
-                                            action_space_shape, action_ranges).to(self.device)
+        self.policy_network = PolicyNetwork(hidden_dim, goal_dim, action_dim, action_ranges).to(self.device)
         self.policy_opt = torch.optim.Adam(self.policy_network.parameters(), lr=policy_lr)
 
         self.curl = CURL(hidden_dim=hidden_dim, device=self.device)
@@ -53,23 +52,24 @@ class SACAgent:
         self.log_alpha = temp.new_tensor([np.log(alpha)], dtype=torch.float, device=self.device, requires_grad=True)
         del temp
 
-        self.target_entropy = -torch.prod(torch.Tensor((action_space_shape, )).to(self.device)).item()
+        self.target_entropy = -torch.prod(torch.Tensor((action_dim, )).to(self.device)).item()
         self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=alpha_lr)
 
     def select_action(self, states, evaluate=False):
         observations = states['observation']
         if self.mode == 'single_env' and len(observations.shape) == 3:
             observations = observations[np.newaxis, :, :, :]
-        goals = states['desired_goal'] - states['achieved_goal']
+
+        observations = self.curl(observations)
+
+        goals = torch.FloatTensor(states['desired_goal'] - states['achieved_goal']).to(self.device)
 
         if not evaluate:
             self.obs_norm.update_stats(observations)
             self.goal_norm.update_stats(goals)
 
-        observations = torch.FloatTensor(self.obs_norm.normalize(observations)).to(self.device)
-        goals = torch.FloatTensor(self.goal_norm.normalize(goals)).to(self.device)
-
-        observations = self.curl(observations)
+        observations = self.obs_norm.normalize(observations)
+        goals = self.goal_norm.normalize(goals)
 
         if evaluate:
             actions = self.policy_network.sample(observations, goals, evaluate=True)
@@ -84,17 +84,17 @@ class SACAgent:
     def train(self, batch, update_alpha=True):
         obs, goals, actions, rewards, next_obs, next_goals, dones = batch
 
-        self.curl.train(obs)
+        self.curl.train(obs, batch_size=1)
 
         # normalize weights
         action_scale = self.policy_network.action_scale
         action_bias = self.policy_network.action_bias
         actions = (actions - action_bias) / action_scale
         # normalize observations and goals
-        obs = self.obs_norm.normalize(obs, device=self.device)
-        goals = self.goal_norm.normalize(goals, device=self.device)
-        next_obs = self.obs_norm.normalize(next_obs, device=self.device)
-        next_goals = self.goal_norm.normalize(next_goals, device=self.device)
+        obs = self.obs_norm.normalize(obs)
+        goals = self.goal_norm.normalize(goals)
+        next_obs = self.obs_norm.normalize(next_obs)
+        next_goals = self.goal_norm.normalize(next_goals)
 
         obs = self.curl(obs)
         next_obs = self.curl(next_obs)
