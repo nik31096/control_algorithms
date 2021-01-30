@@ -3,7 +3,7 @@ import Reach_v0
 
 import matplotlib.pyplot as plt
 
-from robotics.SAC.sac_agent import SACAgent_v1
+from robotics.SAC.sac_agent import SACAgent
 
 from argparse import ArgumentParser
 
@@ -17,18 +17,17 @@ args = parser.parse_args()
 
 env = gym.make(args.env_name)
 
-agent = SACAgent_v1(env.observation_space['observation'].shape[0],
-                    env.observation_space['achieved_goal'].shape[0],
-                    env.action_space.shape[0],
-                    [env.action_space.low[0], env.action_space.high[0]],
-                    gamma=0.99,
-                    tau=0.001,
-                    q_lr=1e-4,
-                    policy_lr=1e-4,
-                    device='cpu',
-                    alpha=1.0,
-                    alpha_lr=1e-4
-                    )
+agent = SACAgent(env.observation_space['observation'].shape[0],
+                 env.observation_space['achieved_goal'].shape[0],
+                 env.action_space.shape[0],
+                 [env.action_space.low[0], env.action_space.high[0]],
+                 gamma=0.99,
+                 tau=0.001,
+                 q_lr=1e-4,
+                 policy_lr=1e-4,
+                 device='cpu',
+                 alpha=1.0,
+                 alpha_lr=1e-4)
 agent.load_pretrained_models(args.model_name, evaluate=True)
 
 states, actions = [], []
@@ -68,5 +67,3 @@ for _ in range(n_runs):
 
 
 print(f"Number of test runs: {n_runs}, success rate: {round(success / n_runs, 3)}")
-
-
