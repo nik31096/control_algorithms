@@ -8,20 +8,17 @@ from tqdm import trange
 import os
 
 from robotics.TD3.td3_agent import TD3Agent
-from robotics.TD3.utils import ExperienceReplay, HindsightExperienceReplay
+from robotics.ExperienceReplays import HindsightExperienceReplay, ExperienceReplay
 from multiprocessing_environment.subproc_env import SubprocVecEnv
-
-# from mujoco_py import GlfwContext
-# GlfwContext(offscreen=True)
 
 
 def main(mode, device):
     # hyperparameters and same code snippets for both modes
-    n_epochs = 500000
+    n_epochs = 5000
     gamma = 0.999
     tau = 5e-3
     batch_size = 64
-    model_name = "pick_td3_2"
+    model_name = "reachV2run_1"
     writer_name = f"./runs/{model_name}"
 
     writer = SummaryWriter(writer_name)
@@ -34,50 +31,47 @@ def main(mode, device):
                 return env
             return _f
 
-        env_id = "FetchPickAndPlace-v1"
-        n_envs = 16
+        env_id = "Reach-v2"
+        n_envs = 32
 
         envs = [make_env(env_id) for _ in range(n_envs)]
-        envs = SubprocVecEnv(envs, context='fork', in_series=2)
+        envs = SubprocVecEnv(envs, context='fork', in_series=4)
         states = envs.reset()
 
         test_env = gym.make(env_id)
+        n_steps = test_env._max_episode_steps
         env_params = {'obs': test_env.observation_space['observation'].shape[0],
                       'actions': test_env.action_space.shape[0],
                       'goals': test_env.observation_space['achieved_goal'].shape[0],
                       'reward_function': test_env.compute_reward,
-                      'max_episode_timesteps': test_env._max_episode_steps}
+                      'max_episode_timesteps': n_steps}
 
-        replay_buffer = HindsightExperienceReplay(env_params=env_params, size=20000, n_envs=n_envs, k=8)
+        replay_buffer = HindsightExperienceReplay(env_params=env_params, size=1000000, n_envs=n_envs, k=16,
+                                                  use_achieved_goal=False)
 
-        agent = TD3Agent(observation_space_shape=envs.observation_space["observation"].shape[0],
-                         goal_space_shape=envs.observation_space["achieved_goal"].shape[0],
-                         action_space_shape=envs.action_space.shape[0],
+        agent = TD3Agent(observation_dim=envs.observation_space["observation"].shape[0],
+                         goal_dim=envs.observation_space["achieved_goal"].shape[0],
+                         action_dim=envs.action_space.shape[0],
                          action_ranges=(envs.action_space.low[0], envs.action_space.high[0]),
                          gamma=gamma,
                          tau=tau,
-                         q_lr=1e-3,
-                         policy_lr=1e-3,
+                         q_lr=3e-4,
+                         policy_lr=3e-4,
                          device=device,
-                         image_as_state=False
-                         )
+                         image_as_state=False)
 
-        pretrained = True
+        pretrained = False
         if pretrained:
             agent.load_pretrained_models('pick_td3_1')
 
         for epoch in trange(n_epochs):
-            for step in range(1000):
-                iteration = epoch * env_params['max_episode_timesteps'] + step
-                if epoch < 500:
-                    actions = np.array([test_env.action_space.sample() for _ in range(n_envs)])
-                else:
-                    actions = agent.select_action(states)
+            for step in range(n_steps):
+                iteration = n_envs * (epoch * n_steps + step)
+                actions = agent.select_action(states)
                 next_states, rewards, dones, info = envs.step(actions)
-                # replay_buffer.put(states, actions, rewards, next_states, dones)
                 replay_buffer.collect_episodes(states, actions, rewards, next_states, dones)
                 # Training
-                if epoch > 10:
+                if epoch > 200:
                     # Training
                     batch = replay_buffer.sample(batch_size)
                     agent.train(batch, iteration, writer)
@@ -87,7 +81,7 @@ def main(mode, device):
                     states = envs.reset()
                     replay_buffer.store_episodes()
                     writer.add_scalar("Success_rate", round(sum([_info['is_success'] for _info in info]) / n_envs, 3),
-                                      epoch)
+                                      iteration)
                     break
 
             ep2log = 100
@@ -97,25 +91,20 @@ def main(mode, device):
                     os.mkdir('./figures')
                 # testing
                 success = 0
+                rewards_sum = 0
                 for _ in range(10):
                     state = test_env.reset()
-                    rewards_sum = 0
-                    distance = 1000
-                    for _ in range(1000):
+                    for _ in range(n_steps):
                         action = agent.select_action(state, evaluate=True)
                         next_state, reward, done, info = test_env.step(action)
                         rewards_sum += reward
-                        distance = min(distance, np.linalg.norm(state['desired_goal'] - state['achieved_goal'], axis=-1))
                         if done:
                             if info['is_success']:
                                 success += 1
-                            writer.add_scalar("Evaluation distance", distance, global_step=(epoch + 1) // ep2log)
-                            writer.add_scalar("Episode reward sum", rewards_sum, global_step=(epoch + 1) // ep2log)
-                            # final_state_from_upper_camera = np.transpose(test_env.render(mode='rgb_array'), [2, 0, 1])
-                            # writer.add_image("Final_state_from_upper_camera", final_state_from_upper_camera,
-                            #                 global_step=(epoch + 1) // ep2log)
                             break
-                writer.add_scalar("Test success rate", round(success / 10, 2), global_step=(epoch + 1) // ep2log)
+
+                writer.add_scalar("Test_average_rewards", rewards_sum / 10, n_envs * epoch * n_steps)
+                writer.add_scalar("Test_success_rate", round(success / 10, 5), n_envs * epoch * n_steps)
 
     else:
         replay_buffer = ExperienceReplay(size=1000000, mode=mode, device=device)
@@ -123,9 +112,9 @@ def main(mode, device):
         env = gym.make('Reach-v1')
         state = env.reset()
 
-        agent = TD3Agent(observation_space_shape=env.observation_space["observation"].shape[0],
-                         goal_space_shape=env.observation_space["achieved_goal"].shape[0],
-                         action_space_shape=env.action_space.shape[0],
+        agent = TD3Agent(observation_dim=env.observation_space["observation"].shape[0],
+                         goal_dim=env.observation_space["achieved_goal"].shape[0],
+                         action_dim=env.action_space.shape[0],
                          action_ranges=(env.action_space.low[0], env.action_space.high[0]),
                          gamma=gamma,
                          tau=tau,

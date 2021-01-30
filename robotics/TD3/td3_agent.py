@@ -9,9 +9,9 @@ from copy import deepcopy
 
 class TD3Agent:
     def __init__(self,
-                 observation_space_shape,
-                 goal_space_shape,
-                 action_space_shape,
+                 observation_dim,
+                 goal_dim,
+                 action_dim,
                  action_ranges,
                  gamma,
                  tau,
@@ -31,19 +31,16 @@ class TD3Agent:
         # TODO: maybe add unique seeds for each environment acting
         self.seeds = [0, 1996]
 
-        self.obs_norm = Normalizer(observation_space_shape, multi_env=True if mode == 'multi_env' else False)
-        self.goal_norm = Normalizer(goal_space_shape, multi_env=True if mode == 'multi_env' else False)
+        self.obs_norm = Normalizer(observation_dim, multi_env=True if mode == 'multi_env' else False)
+        self.goal_norm = Normalizer(goal_dim, multi_env=True if mode == 'multi_env' else False)
 
-        self.q_network_1 = QNetwork(observation_space_shape, goal_space_shape,
-                                    action_space_shape, include_conv=include_conv).to(self.device)
+        self.q_network_1 = QNetwork(observation_dim, goal_dim, action_dim, include_conv=include_conv).to(self.device)
         self.target_q_network_1 = deepcopy(self.q_network_1)
 
-        self.q_network_2 = QNetwork(observation_space_shape, goal_space_shape,
-                                    action_space_shape, include_conv=include_conv).to(self.device)
+        self.q_network_2 = QNetwork(observation_dim, goal_dim, action_dim, include_conv=include_conv).to(self.device)
         self.target_q_network_2 = deepcopy(self.q_network_2)
 
-        self.policy_network = PolicyNetwork(observation_space_shape, goal_space_shape,
-                                            action_space_shape, include_conv=include_conv).to(self.device)
+        self.policy_network = PolicyNetwork(observation_dim, goal_dim, action_dim, include_conv=include_conv).to(self.device)
         self.target_policy_network = deepcopy(self.policy_network)
 
         self.exploration_noise = torch.distributions.Normal(0, 0.1)
