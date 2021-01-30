@@ -26,20 +26,14 @@ class Reach2DEnv(gym.GoalEnv):
                  n_substeps,
                  distance_threshold,
                  initial_qpos,
-                 mode='model-free',
                  state_form='image',
                  width=84,
                  height=84,
                  dynamical_goal=True,
                  limited_goal_area=True,
-                 has_obstacle=False
-                 ):
-        """
-        :param mode: two options: 'model-free' for model-free RL and 'model-based' for optimal control (OptimalControl and DifferentialDynamicProgramming)
-        """
+                 has_obstacle=False):
         self.n_substeps = n_substeps
 
-        self.mode = mode
         self.state_form = state_form
         self.width = width
         self.height = height
@@ -49,18 +43,16 @@ class Reach2DEnv(gym.GoalEnv):
 
         self.action_space = gym.spaces.Box(-1., 1., shape=(n_actions, ), dtype='float32')
 
-        if mode == 'model-free' and state_form == 'image':
+        if state_form == 'image':
             self.observation_space = gym.spaces.Dict(dict(
                 observation=gym.spaces.Box(0., 1., shape=(self.width, self.height, 3), dtype='float32'),
                 achieved_goal=gym.spaces.Box(-np.inf, np.inf, shape=(3, ), dtype='float32'),
-                desired_goal=gym.spaces.Box(-np.inf, np.inf, shape=(3,), dtype='float32')
-            ))
-        elif mode == 'model-free' and state_form == 'angles':
+                desired_goal=gym.spaces.Box(-np.inf, np.inf, shape=(3,), dtype='float32')))
+        elif state_form == 'angles':
             self.observation_space = gym.spaces.Dict(dict(
                 observation=gym.spaces.Box(-np.inf, np.inf, shape=(4,), dtype='float32'),
                 achieved_goal=gym.spaces.Box(-np.inf, np.inf, shape=(3,), dtype='float32'),
-                desired_goal=gym.spaces.Box(-np.inf, np.inf, shape=(3,), dtype='float32')
-            ))
+                desired_goal=gym.spaces.Box(-np.inf, np.inf, shape=(3,), dtype='float32')))
 
         # MuJoCo part
         if model_path.startswith('/'):
@@ -153,13 +145,10 @@ class Reach2DEnv(gym.GoalEnv):
 
         if mode == 'human':
             self.viewer.render()
-
         elif mode == 'rgb_array':
             img = self.viewer._read_pixels_as_in_window(resolution=(width, height))
-            # glfw.terminate()
 
             return img
-
         else:
             raise NameError("No such mode is available")
 
@@ -212,6 +201,7 @@ class Reach2DEnv(gym.GoalEnv):
         return state
     
     def _get_obs(self):
+        # TODO: get rid of achieved_goal in the state formulation.
         end_pos = self.sim.data.get_site_xpos('end_site')
         if self.state_form == 'image':
             # camera_image = self.render(mode='rgb_array')
@@ -343,8 +333,9 @@ class ReachEnv_v0(Reach2DEnv, EzPickle):
                             n_substeps=n_substeps,
                             distance_threshold=distance_threshold,
                             initial_qpos={'joint_1': 0, 'joint_2': 0},
-                            state_form='image'
-                            )
+                            state_form='image',
+                            dynamical_goal=True,
+                            limited_goal_area=True)
         EzPickle.__init__(self)
 
 
@@ -380,7 +371,7 @@ class ReachEnv_v2(Reach2DEnv, EzPickle):
         model_path = 'manipulator_without_joint_limits.xml'
         n_actions = 2
         n_substeps = 20
-        distance_threshold = 0.08
+        distance_threshold = 0.05
 
         Reach2DEnv.__init__(self,
                             model_path=model_path,
@@ -390,8 +381,7 @@ class ReachEnv_v2(Reach2DEnv, EzPickle):
                             initial_qpos={'joint_1': 0, 'joint_2': 0},
                             state_form='angles',
                             limited_goal_area=False,
-                            dynamical_goal=False # TODO: change to True
-                            )
+                            dynamical_goal=True)
         EzPickle.__init__(self)
 
 
