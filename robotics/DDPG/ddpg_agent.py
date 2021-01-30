@@ -9,9 +9,9 @@ from copy import deepcopy
 
 class DDPGAgent:
     def __init__(self,
-                 observation_space_shape,
-                 goal_space_shape,
-                 action_space_shape,
+                 observation_dim,
+                 goal_dim,
+                 action_dim,
                  action_ranges,
                  gamma,
                  tau,
@@ -27,15 +27,14 @@ class DDPGAgent:
         self.device = device
         include_conv = image_as_state
 
-        self.obs_norm = Normalizer(observation_space_shape, multi_env=True if mode == 'multi_env' else False)
-        self.goal_norm = Normalizer(goal_space_shape, multi_env=True if mode == 'multi_env' else False)
+        self.obs_norm = Normalizer(observation_dim, multi_env=True if mode == 'multi_env' else False)
+        self.goal_norm = Normalizer(goal_dim, multi_env=True if mode == 'multi_env' else False)
 
-        self.q_network = QNetwork(observation_space_shape, goal_space_shape,
-                                  action_space_shape, include_conv=include_conv).to(self.device)
+        self.q_network = QNetwork(observation_dim, goal_dim, action_dim, include_conv=include_conv).to(self.device)
         self.target_q_network = deepcopy(self.q_network)
 
-        self.policy_network = PolicyNetwork(observation_space_shape, goal_space_shape,
-                                            action_space_shape, action_ranges, include_conv=include_conv).to(self.device)
+        self.policy_network = PolicyNetwork(observation_dim, goal_dim, action_dim, action_ranges,
+                                            include_conv=include_conv).to(self.device)
         self.target_policy_network = deepcopy(self.policy_network)
 
         self.q_opt = torch.optim.Adam(self.q_network.parameters(), lr=q_lr)
@@ -61,7 +60,7 @@ class DDPGAgent:
         if self.mode == 'single_env':
             actions = actions.squeeze()
 
-        return actions
+        return actions.cpu().data.numpy()
 
     def train(self, batch):
         obs, goals, actions, rewards, next_obs, next_goals, dones = batch
@@ -104,7 +103,7 @@ class DDPGAgent:
         self._soft_update(self.target_q_network, self.q_network, self.tau)
         self._soft_update(self.target_policy_network, self.policy_network, self.tau)
 
-        return q_loss, policy_loss
+        return q_loss, q.mean(), policy_loss
 
     @staticmethod
     def _soft_update(target, online, tau):

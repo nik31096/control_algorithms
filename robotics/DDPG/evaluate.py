@@ -3,8 +3,6 @@ import Reach_v0
 
 from robotics.DDPG.ddpg_agent import DDPGAgent
 
-from torch.utils.tensorboard import SummaryWriter
-
 from argparse import ArgumentParser
 
 parser = ArgumentParser()
@@ -26,10 +24,8 @@ agent = DDPGAgent(env.observation_space['observation'].shape[0],
                   q_lr=1e-4,
                   policy_lr=1e-4,
                   image_as_state=False,
-                  device='cpu'
-                  )
+                  device='cpu')
 agent.load_pretrained_models(args.model_name, evaluate=True)
-state = env.reset()
 
 n_runs = args.n_runs
 success = 0
@@ -51,5 +47,3 @@ for _ in range(n_runs):
         i += 1
 
 print(f"Number of test runs: {n_runs}, success rate: {round(success / n_runs, 3)}")
-
-
