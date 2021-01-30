@@ -101,36 +101,39 @@ class CURL:
 
         self.opt = torch.optim.Adam(list(self.encoder.parameters()) + [self.W], lr=1e-4)
 
-    def __call__(self, x):
+    def encode_obs(self, x, to_numpy=False):
+        if not isinstance(x, torch.Tensor):
+            x = torch.FloatTensor(x).to(self.device)
         out = self.encoder(x)
+        if to_numpy:
+            out = out.cpu().data.numpy()
 
         return out
 
-    def train(self, obs, batch_size=32, epochs=10):
+    def train(self, obs):
         # obs should be 4-d tensor with (batch_size, 3*num_frames, W, H)
         # where num_frames is number stacked frames for speed capture.
 
         # in CURL_SAC query and keys are processed to get contrastive loss
         # for each ob in obs random crop is made and self.neg_n random crops
         # from different images are made also.
-        for epoch in range(epochs):
-            idxs = np.random.randint(0, obs.shape[0], size=batch_size)
-            batch_obs = obs[idxs, ...].to(self.device)
-            query_crops = torch.stack([self.random_crop(ob) for ob in batch_obs], dim=0)
-            key_crops = torch.stack([self.random_crop(ob) for ob in batch_obs], dim=0)
-            query_enc = self.encoder(query_crops)
-            key_enc = self.momentum_encoder(key_crops).detach()
-            Wz = torch.matmul(self.W, key_enc.T)
-            logits = torch.matmul(query_enc, Wz)
-            # subtract max from logits for stability according to original paper
-            logits = logits - torch.max(logits, dim=1)[0]
-            labels = torch.arange(logits.shape[0]).to(self.device)
-            loss = nn.CrossEntropyLoss()(logits, labels)
-            loss.backward()
-            self.opt.step()
-            self.opt.zero_grad()
+        query_crops = torch.stack([self.random_crop(ob) for ob in obs], dim=0).to(self.device)
+        key_crops = torch.stack([self.random_crop(ob) for ob in obs], dim=0).to(self.device)
+        query_enc = self.encoder(query_crops)
+        key_enc = self.momentum_encoder(key_crops).detach()
+        Wz = torch.matmul(self.W, key_enc.T)
+        logits = torch.matmul(query_enc, Wz)
+        # subtract max from logits for stability according to original paper
+        logits = logits - torch.max(logits, dim=1)[0]
+        labels = torch.arange(logits.shape[0]).to(self.device)
+        loss = nn.CrossEntropyLoss()(logits, labels)
+        loss.backward()
+        self.opt.step()
+        self.opt.zero_grad()
 
         self._soft_update()
+
+        return loss.cpu().data.numpy()
 
     def _soft_update(self):
         for params, target_params in zip(self.encoder.parameters(), self.momentum_encoder.parameters()):
