@@ -133,7 +133,7 @@ class iLQR:
     def fit_controller(self, controls=None, epochs=20, initial_state=None, verbose=0):
         assert epochs > 0, "Epochs should be positive integers."
         if controls is None:
-            controls = [0.001 * autonp.ones((self.action_dim,)) for _ in range(self.T)]
+            controls = [1e-3 * autonp.ones((self.action_dim,)) for _ in range(self.T)]
 
         if initial_state is not None:
             self.initial_state = autonp.array(initial_state)
@@ -180,20 +180,19 @@ class iLQR:
             controller_params = pkl.load(f)
 
         controller = iLQR(dynamics=controller_params['dyn'],
-                          initial_state=controller_params['initial_state'],
+                          initial_state=controller_params.get('initial_state', None),
                           final_state=controller_params['final_state'],
                           state_dim=controller_params['state_dim'],
                           action_dim=controller_params['action_dim'],
                           horizon=controller_params['T'],
-                          k_gains=controller_params['k_gains'],
-                          controls=controller_params['controls'])
+                          k_gains=controller_params['k_gains'])
 
         return controller
 
     @staticmethod
     def cost(x, u, x_i, u_i, x_target):
         alpha = 0.97
-        pure_cost = 0.5 * autonp.sum(u ** 2)
+        pure_cost = 0.5 * autonp.sum(u ** 2) + 1e2 * autonp.sum((x - x_target) ** 2)
         cost_correction = autonp.sum((x - x_i) ** 2) + autonp.sum((u - u_i) ** 2)
         c = alpha * cost_correction + (1 - alpha) * pure_cost
 

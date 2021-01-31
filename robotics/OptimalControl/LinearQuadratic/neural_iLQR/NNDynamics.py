@@ -26,15 +26,16 @@ class LinearDynamicsNet(nn.Module):
         out = torch.cat([processed_state, processed_action], dim=-1)
         out = F.relu(self.common_layer(out))
         A = self.matrixA(out)
-        A = torch.reshape(A, (self.state_dim, self.state_dim))
+        A = torch.reshape(A, (-1, self.state_dim, self.state_dim))
 
         B = self.matrixB(out)
-        B = torch.reshape(B, (self.state_dim, self.action_dim))
+        B = torch.reshape(B, (-1, self.state_dim, self.action_dim))
 
         return A, B
 
     def forward(self, state, action):
         A, B = self.obtain_system(state, action)
+        print(A.shape, state.shape, B.shape, action.shape)
         next_state = torch.dot(A, state) + torch.dot(B, action)
         if self.stochastic:
             normal = torch.distributions.Normal(loc=next_state, scale=1)
@@ -56,7 +57,7 @@ class LinearDynamics:
         self.build_network()
 
     def build_network(self):
-        self.net = LinearDynamicsNet(self.state_dim, self.action_dim, stochastic=self.stochastic)
+        self.net = LinearDynamicsNet(self.state_dim, self.action_dim, stochastic=self.stochastic).to(self.device)
 
         self.opt = torch.optim.Adam(lr=1e-4, params=self.net.parameters())
         self.opt.zero_grad()
@@ -95,6 +96,12 @@ class LinearDynamics:
 
         return get_derivative
 
+    def save(self, name):
+        torch.save(self.net.state_dict(), name)
+
+    def load(self, name):
+        self.net.load_state_dict(torch.load(name, map_location=lambda storage, location: storage))
+
 
 class NonLinearDynamicsNet(nn.Module):
     def __init__(self, state_dim, action_dim, device='cuda'):
@@ -126,7 +133,8 @@ class NonLinearDynamicsNet(nn.Module):
 class NonLinearDynamics(LinearDynamics):
     def __init__(self, state_dim, action_dim, device='cuda', derivative_method='nn', stochastic=False):
         if not derivative_method in ['nn', 'batch', 'forward', 'backward', 'center']:
-            raise ValueError("Unknown value of derivative method!")
+            raise ValueError("Unknown value of derivative method, supported are 'nn', 'batch',"
+                             f"'forward', 'backward' and 'center', but got {derivative_method}")
 
         super(NonLinearDynamics, self).__init__(state_dim, action_dim, device, derivative_method, stochastic)
 
@@ -256,12 +264,6 @@ class NonLinearDynamics(LinearDynamics):
             return jacobian.cpu().data.numpy()
 
         return get_derivative
-
-    def save(self, name):
-        torch.save(self.net.state_dict(), name)
-
-    def load(self, name):
-        self.net.load_state_dict(torch.load(name, map_location=lambda storage, location: storage))
 
 
 class ExpRepItem:
